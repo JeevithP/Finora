@@ -30,7 +30,7 @@ export default function Home() {
                 Log In
               </Button>
             </Link>
-            <Link href="/register">
+            <Link href="/signup">
               <Button size="sm" className="gap-1.5 font-medium shadow-xs">
                 Get Started <ArrowRight className="h-3.5 w-3.5" />
               </Button>
@@ -61,14 +61,14 @@ export default function Home() {
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link href="/register">
+              <Link href="/signup">
                 <Button size="lg" className="h-12 px-8 text-base font-semibold shadow-md gap-2">
                   Create Free Account <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
               <Link href="/login">
                 <Button variant="outline" size="lg" className="h-12 px-8 text-base font-medium">
-                  Live Demo Login
+                  Sign In
                 </Button>
               </Link>
             </div>

@@ -43,6 +43,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       accounts: {
         Row: {
@@ -87,6 +88,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       categories: {
         Row: {
@@ -119,6 +121,7 @@ export interface Database {
           is_system?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       transactions: {
         Row: {
@@ -166,6 +169,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       budgets: {
         Row: {
@@ -198,6 +202,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: {
@@ -212,6 +217,7 @@ export interface Database {
           calculated_balance: number;
           is_reconciled: boolean;
         };
+        Relationships: [];
       };
     };
     Functions: {
@@ -236,3 +242,10 @@ export interface Database {
     };
   };
 }
+
+export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+export type Account = Database["public"]["Tables"]["accounts"]["Row"];
+export type Category = Database["public"]["Tables"]["categories"]["Row"];
+export type Transaction = Database["public"]["Tables"]["transactions"]["Row"];
+export type Budget = Database["public"]["Tables"]["budgets"]["Row"];
+export type AccountBalanceView = Database["public"]["Views"]["v_account_balances"]["Row"];
