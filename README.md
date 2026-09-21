@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Finora — Personal Finance & Wealth Management Platform
 
-## Getting Started
+Finora is a production-grade personal finance and wealth management platform designed for clarity, bank-grade security, and robust ledger accounting. Built with Next.js 16, React 19, Tailwind CSS v4, and Supabase PostgreSQL.
 
-First, run the development server:
+## 🚀 Live Production Deployment
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Production URL:** [https://finora-ten-psi.vercel.app](https://finora-ten-psi.vercel.app)
+- **Deployment Platform:** Vercel (Edge & Node.js Serverless Runtime)
+- **Database & Auth:** Supabase Cloud (PostgreSQL 15+ with Row Level Security)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🛠️ Tech Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Framework:** Next.js 16 (App Router, Turbopack, React Server Components & Server Actions)
+- **UI & Styling:** React 19, Tailwind CSS v4, Lucide Icons, Radix UI Primitives, Sonner
+- **Validation:** Zod v4, React Hook Form
+- **Backend & Database:** Supabase PostgreSQL with strict Row Level Security (RLS)
+- **Authentication:** Supabase SSR (`@supabase/ssr`) with Next.js 16 `proxy.ts` request interception
+- **Ledger Engine:** PostgreSQL trigger-enforced balance synchronization and `security_invoker` reconciliation views
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 🏗️ Architecture & Security Model
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. **Authoritative Financial Ledger:**
+   - All balance changes are computed transactionally at the database level via PostgreSQL triggers (`fn_sync_account_balance_on_transaction`).
+   - Account balances are continuously validated against the `v_account_balances` reconciliation view.
+2. **Strict Multi-Tenant Row Level Security (RLS):**
+   - Every table (`profiles`, `accounts`, `categories`, `transactions`, `budgets`) enforces user-level RLS policies.
+   - Cross-user foreign key references (e.g., transfers, destination accounts, categories) are strictly validated against `auth.uid()`.
+3. **Session & Route Protection:**
+   - Root request interception via Next.js 16 `proxy.ts` using fast JWT claims decoding (`getClaims()`) to protect private routes (`/dashboard/*`) and redirect authenticated sessions from auth pages (`/login`, `/signup`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 📋 Environment Variables
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+To configure Finora locally or in production, define the following environment variables (see `.env.example`):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variable | Description |
+| :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL (`https://<project-ref>.supabase.co`) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Your Supabase Publishable / Anon API key |
+| `NEXT_PUBLIC_APP_URL` | Canonical application URL for redirects (e.g. `http://localhost:3000` or production domain) |
+
+> **Note:** Never commit private `.env.local` files or service-role keys. Production credentials must be configured securely in the deployment provider dashboard.
+
+---
+
+## 💻 Local Development
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/JeevithP/Finora.git
+   cd Finora
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Configure environment:**
+   Create a `.env.local` file based on `.env.example`:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Fill in your Supabase project credentials.
+
+4. **Run development server:**
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+5. **Run production build:**
+   ```bash
+   npm run build
+   npm run start
+   ```
+
+---
+
+## 🗺️ Product Roadmap
+
+- [x] **M0: Project Initialization & UI Primitives**
+- [x] **M1: Database Foundation, RLS, Triggers, & Reconciliation View**
+- [x] **M2: Authentication & Protected Dashboard**
+- [x] **M3: Production Deployment & Smoke Testing**
+- [ ] **M4: Accounts Management**
+- [ ] **M5: Transactions & Balance Trigger Validation**
+- [ ] **M6: Category Budgets**
+- [ ] **M7: Dashboard & Wealth Analytics**
+- [ ] **M8: Smart Statement Import**
+- [ ] **M9+: Advanced Features & Integrations**
+
