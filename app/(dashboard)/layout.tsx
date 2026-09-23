@@ -56,13 +56,16 @@ export default async function DashboardLayout({
             <nav className="hidden md:flex items-center gap-1 text-sm font-medium">
               <Link
                 href="/dashboard"
-                className="rounded-lg bg-primary/10 px-3 py-1.5 text-primary"
+                className="rounded-lg px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
               >
                 Dashboard
               </Link>
-              <span className="rounded-lg px-3 py-1.5 text-muted-foreground/60 cursor-not-allowed">
+              <Link
+                href="/accounts"
+                className="rounded-lg px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
                 Accounts
-              </span>
+              </Link>
               <span className="rounded-lg px-3 py-1.5 text-muted-foreground/60 cursor-not-allowed">
                 Transactions
               </span>
