@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -57,9 +56,8 @@ export function CreateAccountDialog({
   trigger,
   defaultCurrency = "INR",
 }: CreateAccountDialogProps) {
-  const router = useRouter();
   const [internalOpen, setInternalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, startTransition] = useTransition();
 
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
@@ -88,30 +86,28 @@ export function CreateAccountDialog({
   const selectedCurrency = watch("currency");
   const selectedColor = watch("color");
 
-  const onSubmit = async (values: CreateAccountInput) => {
-    setIsSubmitting(true);
-    try {
-      const res = await createAccountAction(values);
-      if (res.success) {
-        toast.success(`Account "${values.name}" created successfully!`);
-        reset({
-          name: "",
-          type: "checking",
-          initialBalance: 0,
-          currency: defaultCurrency,
-          color: "#3b82f6",
-          icon: "Landmark",
-        });
-        router.refresh();
-        setOpen(false);
-      } else {
-        toast.error(res.error || "Failed to create account");
+  const onSubmit = (values: CreateAccountInput) => {
+    startTransition(async () => {
+      try {
+        const res = await createAccountAction(values);
+        if (res.success) {
+          toast.success(`Account "${values.name}" created successfully!`);
+          reset({
+            name: "",
+            type: "checking",
+            initialBalance: 0,
+            currency: defaultCurrency,
+            color: "#3b82f6",
+            icon: "Landmark",
+          });
+          setOpen(false);
+        } else {
+          toast.error(res.error || "Failed to create account");
+        }
+      } catch {
+        toast.error("An unexpected error occurred while creating the account.");
       }
-    } catch {
-      toast.error("An unexpected error occurred while creating the account.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   };
 
   return (

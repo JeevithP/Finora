@@ -3,8 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TrendingUp, User as UserIcon } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/server";
-import { Profile } from "@/types/database.types";
+import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
 import { Badge } from "@/components/ui/badge";
 import { LogoutButton } from "@/components/auth/logout-button";
 
@@ -13,22 +12,13 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser();
 
   if (!user) {
     redirect("/login");
   }
 
-  const { data } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const profile = data as Profile | null;
+  const profile = await getUserProfile(user.id);
 
   const displayName = profile?.full_name || user.email?.split("@")[0] || "User";
   const currency = profile?.default_currency || "INR";

@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useTransition } from "react";
 import { toast } from "sonner";
 import { Trash2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -28,25 +27,22 @@ export function DeleteAccountDialog({
   open,
   onOpenChange,
 }: DeleteAccountDialogProps) {
-  const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, startTransition] = useTransition();
 
-  const handleDelete = async () => {
-    setIsSubmitting(true);
-    try {
-      const res = await deleteAccountAction(account.id);
-      if (res.success) {
-        toast.success(`Account "${account.name}" permanently deleted.`);
-        router.refresh();
-        onOpenChange(false);
-      } else {
-        toast.error(res.error || "Failed to delete account");
+  const handleDelete = () => {
+    startTransition(async () => {
+      try {
+        const res = await deleteAccountAction(account.id);
+        if (res.success) {
+          toast.success(`Account "${account.name}" permanently deleted.`);
+          onOpenChange(false);
+        } else {
+          toast.error(res.error || "Failed to delete account");
+        }
+      } catch {
+        toast.error("An unexpected error occurred while deleting the account.");
       }
-    } catch {
-      toast.error("An unexpected error occurred while deleting the account.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   };
 
   return (

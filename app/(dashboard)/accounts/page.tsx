@@ -1,51 +1,44 @@
 import { redirect } from "next/navigation";
 import { Landmark } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { Account, Profile } from "@/types/database.types";
+import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
+import { Account } from "@/types/database.types";
 import { AccountSummaryCards } from "@/components/accounts/account-summary-cards";
 import { AccountGrid } from "@/components/accounts/account-grid";
 
 export default async function AccountsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser();
 
   if (!user) {
     redirect("/login");
   }
 
-  // Fetch user profile for default currency
-  const { data: profileData } = await supabase
-    .from("profiles")
-    .select("default_currency")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const profile = profileData as Pick<Profile, "default_currency"> | null;
+  const profile = await getUserProfile(user.id);
   const defaultCurrency = profile?.default_currency || "INR";
 
-  // Fetch all accounts owned by user
-  const { data: accountsData, error } = await supabase
-    .from("accounts")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const supabase = await createClient();
 
-  if (error) {
-    console.error("Failed to load accounts:", error);
+  // Fetch accounts and transaction presence in parallel
+  const [accountsResult, transactionsResult] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("transactions")
+      .select("account_id, destination_account_id")
+      .eq("user_id", user.id),
+  ]);
+
+  if (accountsResult.error) {
+    console.error("Failed to load accounts:", accountsResult.error);
   }
 
-  const accounts = (accountsData as Account[]) || [];
-
-  // Fetch transactions for user's accounts to determine transaction presence
-  const { data: userTransactions } = await supabase
-    .from("transactions")
-    .select("account_id, destination_account_id")
-    .eq("user_id", user.id);
+  const accounts = (accountsResult.data as Account[]) || [];
 
   const transactionCounts: Record<string, number> = {};
-  (userTransactions || []).forEach((tx) => {
+  (transactionsResult.data || []).forEach((tx) => {
     if (tx.account_id) {
       transactionCounts[tx.account_id] = (transactionCounts[tx.account_id] || 0) + 1;
     }

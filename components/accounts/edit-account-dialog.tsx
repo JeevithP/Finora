@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -58,8 +57,7 @@ export function EditAccountDialog({
   onOpenChange,
   hasTransactions = false,
 }: EditAccountDialogProps) {
-  const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, startTransition] = useTransition();
 
   const {
     register,
@@ -95,22 +93,20 @@ export function EditAccountDialog({
   const selectedCurrency = watch("currency");
   const selectedColor = watch("color");
 
-  const onSubmit = async (values: UpdateAccountInput) => {
-    setIsSubmitting(true);
-    try {
-      const res = await updateAccountAction(values);
-      if (res.success) {
-        toast.success(`Account "${values.name}" updated successfully!`);
-        router.refresh();
-        onOpenChange(false);
-      } else {
-        toast.error(res.error || "Failed to update account");
+  const onSubmit = (values: UpdateAccountInput) => {
+    startTransition(async () => {
+      try {
+        const res = await updateAccountAction(values);
+        if (res.success) {
+          toast.success(`Account "${values.name}" updated successfully!`);
+          onOpenChange(false);
+        } else {
+          toast.error(res.error || "Failed to update account");
+        }
+      } catch {
+        toast.error("An unexpected error occurred while updating the account.");
       }
-    } catch {
-      toast.error("An unexpected error occurred while updating the account.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   };
 
   return (

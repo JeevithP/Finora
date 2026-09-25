@@ -1,27 +1,17 @@
 import { redirect } from "next/navigation";
 import { ShieldCheck, UserCheck, KeyRound, Database } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
-import { Profile } from "@/types/database.types";
+import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser();
 
   if (!user) {
     redirect("/login");
   }
 
-  const { data } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const profile = data as Profile | null;
+  const profile = await getUserProfile(user.id);
 
   const formattedDate = profile?.created_at
     ? new Date(profile.created_at).toLocaleDateString("en-IN", {

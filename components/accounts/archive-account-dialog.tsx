@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useTransition } from "react";
 import { toast } from "sonner";
 import { Archive, RotateCcw, Loader2 } from "lucide-react";
 
@@ -28,30 +27,27 @@ export function ArchiveAccountDialog({
   open,
   onOpenChange,
 }: ArchiveAccountDialogProps) {
-  const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, startTransition] = useTransition();
   const isArchived = account.is_archived;
 
-  const handleToggle = async () => {
-    setIsSubmitting(true);
-    try {
-      const res = await toggleArchiveAccountAction(account.id, !isArchived);
-      if (res.success) {
-        toast.success(
-          isArchived
-            ? `Account "${account.name}" restored to active accounts.`
-            : `Account "${account.name}" has been archived.`
-        );
-        router.refresh();
-        onOpenChange(false);
-      } else {
-        toast.error(res.error || "Failed to update account archive status");
+  const handleToggle = () => {
+    startTransition(async () => {
+      try {
+        const res = await toggleArchiveAccountAction(account.id, !isArchived);
+        if (res.success) {
+          toast.success(
+            isArchived
+              ? `Account "${account.name}" restored to active accounts.`
+              : `Account "${account.name}" has been archived.`
+          );
+          onOpenChange(false);
+        } else {
+          toast.error(res.error || "Failed to update account archive status");
+        }
+      } catch {
+        toast.error("An unexpected error occurred.");
       }
-    } catch {
-      toast.error("An unexpected error occurred.");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   };
 
   return (
