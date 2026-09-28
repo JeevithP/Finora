@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 
 import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
 import { createClient } from "@/lib/supabase/server";
-import { getTransactionsAction } from "@/actions/transactions";
+import { TRANSACTION_SELECT_QUERY } from "@/lib/constants";
+import type { TransactionWithRelations } from "@/actions/transactions";
 import { Account, Category } from "@/types/database.types";
 import { TransactionTable } from "@/components/transactions/transaction-table";
 
@@ -18,10 +19,16 @@ export default async function TransactionsPage() {
   const supabase = await createClient();
 
   // Parallelize independent data fetches: user profile, transactions list, accounts, categories
-  const [profile, txResult, accountsResult, categoriesResult] =
+  const [profile, transactionsResult, accountsResult, categoriesResult] =
     await Promise.all([
       getUserProfile(user.id),
-      getTransactionsAction(),
+      supabase
+        .from("transactions")
+        .select(TRANSACTION_SELECT_QUERY)
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(50),
       supabase
         .from("accounts")
         .select("*")
@@ -35,7 +42,8 @@ export default async function TransactionsPage() {
     ]);
 
   const defaultCurrency = profile?.default_currency || "INR";
-  const transactions = txResult.success ? txResult.data || [] : [];
+  const transactions = (transactionsResult.data ||
+    []) as unknown as TransactionWithRelations[];
   const accounts = (accountsResult.data || []) as Account[];
   const categories = (categoriesResult.data || []) as Category[];
 

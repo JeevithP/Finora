@@ -12,6 +12,7 @@ import {
   type TransactionQueryInput,
 } from "@/lib/validations/transaction";
 import { Transaction, Account, Category } from "@/types/database.types";
+import { TRANSACTION_SELECT_QUERY } from "@/lib/constants";
 
 export type TransactionWithRelations = Transaction & {
   account?: Pick<Account, "id" | "name" | "type" | "currency" | "color" | "icon"> | null;
@@ -32,13 +33,6 @@ export interface TransactionListResult {
   error?: string;
   count?: number;
 }
-
-const TRANSACTION_SELECT_QUERY = `
-  *,
-  account:accounts!transactions_account_id_fkey(id, name, type, currency, color, icon),
-  destination_account:accounts!transactions_destination_account_id_fkey(id, name, type, currency, color, icon),
-  category:categories(id, name, type, icon, color, is_system)
-`;
 
 /**
  * CREATE TRANSACTION
@@ -215,7 +209,7 @@ export async function getTransactionsAction(
 
   let query = supabase
     .from("transactions")
-    .select(TRANSACTION_SELECT_QUERY, { count: "exact" })
+    .select(TRANSACTION_SELECT_QUERY)
     .eq("user_id", user.id)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });

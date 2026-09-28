@@ -47,3 +47,10 @@ export const DEFAULT_INCOME_CATEGORIES = [
   { name: "Gifts & Grants", icon: "Gift", color: "#EC4899" },
   { name: "Other Income", icon: "Coins", color: "#6B7280" },
 ] as const;
+
+export const TRANSACTION_SELECT_QUERY = `
+  *,
+  account:accounts!transactions_account_id_fkey(id, name, type, currency, color, icon),
+  destination_account:accounts!transactions_destination_account_id_fkey(id, name, type, currency, color, icon),
+  category:categories(id, name, type, icon, color, is_system)
+`;

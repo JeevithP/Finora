@@ -13,39 +13,45 @@ export default async function AccountsPage() {
     redirect("/login");
   }
 
-  const profile = await getUserProfile(user.id);
-  const defaultCurrency = profile?.default_currency || "INR";
-
   const supabase = await createClient();
 
-  // Fetch accounts and transaction presence in parallel
-  const [accountsResult, transactionsResult] = await Promise.all([
+  // Parallelize user profile and accounts with embedded transaction existence check
+  const [profile, accountsResult] = await Promise.all([
+    getUserProfile(user.id),
     supabase
       .from("accounts")
-      .select("*")
+      .select(
+        "*, tx_src:transactions!transactions_account_id_fkey(id), tx_dst:transactions!transactions_destination_account_id_fkey(id)"
+      )
       .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("transactions")
-      .select("account_id, destination_account_id")
-      .eq("user_id", user.id),
+      .order("created_at", { ascending: false })
+      .limit(1, { foreignTable: "tx_src" })
+      .limit(1, { foreignTable: "tx_dst" }),
   ]);
+
+  const defaultCurrency = profile?.default_currency || "INR";
 
   if (accountsResult.error) {
     console.error("Failed to load accounts:", accountsResult.error);
   }
 
-  const accounts = (accountsResult.data as Account[]) || [];
+  type RawAccountWithTx = Account & {
+    tx_src?: { id: string }[];
+    tx_dst?: { id: string }[];
+  };
+
+  const rawAccounts = (accountsResult.data ||
+    []) as unknown as RawAccountWithTx[];
 
   const transactionCounts: Record<string, number> = {};
-  (transactionsResult.data || []).forEach((tx) => {
-    if (tx.account_id) {
-      transactionCounts[tx.account_id] = (transactionCounts[tx.account_id] || 0) + 1;
+  const accounts: Account[] = rawAccounts.map((rawAcc) => {
+    const { tx_src, tx_dst, ...account } = rawAcc;
+    const srcCount = tx_src?.length || 0;
+    const dstCount = tx_dst?.length || 0;
+    if (srcCount > 0 || dstCount > 0) {
+      transactionCounts[account.id] = srcCount + dstCount;
     }
-    if (tx.destination_account_id) {
-      transactionCounts[tx.destination_account_id] =
-        (transactionCounts[tx.destination_account_id] || 0) + 1;
-    }
+    return account as Account;
   });
 
   return (

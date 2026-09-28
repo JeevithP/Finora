@@ -41,8 +41,35 @@ export function TransactionFilterBar({
   onCategoryChange,
   onResetFilters,
 }: TransactionFilterBarProps) {
+  const [localSearch, setLocalSearch] = React.useState(searchQuery);
+
+  // Synchronize when external reset or searchQuery changes
+  React.useEffect(() => {
+    setLocalSearch(searchQuery);
+  }, [searchQuery]);
+
+  // Debounce search query changes by 250ms
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== searchQuery) {
+        onSearchChange(localSearch);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [localSearch, searchQuery, onSearchChange]);
+
+  const handleClearSearch = () => {
+    setLocalSearch("");
+    onSearchChange("");
+  };
+
+  const handleResetFilters = () => {
+    setLocalSearch("");
+    onResetFilters();
+  };
+
   const hasActiveFilters =
-    searchQuery.trim() !== "" ||
+    localSearch.trim() !== "" ||
     selectedAccount !== "all" ||
     selectedType !== "all" ||
     selectedCategory !== "all";
@@ -54,14 +81,14 @@ export function TransactionFilterBar({
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search description, notes, or account..."
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
           className="pl-9 pr-8 text-xs h-9 bg-background"
         />
-        {searchQuery && (
+        {localSearch && (
           <button
             type="button"
-            onClick={() => onSearchChange("")}
+            onClick={handleClearSearch}
             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
@@ -139,7 +166,7 @@ export function TransactionFilterBar({
           <Button
             variant="ghost"
             size="sm"
-            onClick={onResetFilters}
+            onClick={handleResetFilters}
             className="h-9 px-2.5 text-xs text-muted-foreground hover:text-foreground"
           >
             <X className="h-3.5 w-3.5 mr-1" />

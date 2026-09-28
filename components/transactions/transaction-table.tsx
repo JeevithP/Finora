@@ -32,11 +32,33 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CreateTransactionDialog } from "./create-transaction-dialog";
-import { EditTransactionDialog } from "./edit-transaction-dialog";
-import { DeleteTransactionDialog } from "./delete-transaction-dialog";
+import dynamic from "next/dynamic";
 import { TransactionFilterBar } from "./transaction-filter-bar";
 import { TransactionEmptyState } from "./transaction-empty-state";
+
+const CreateTransactionDialog = dynamic(
+  () =>
+    import("./create-transaction-dialog").then(
+      (mod) => mod.CreateTransactionDialog
+    ),
+  { ssr: false }
+);
+
+const EditTransactionDialog = dynamic(
+  () =>
+    import("./edit-transaction-dialog").then(
+      (mod) => mod.EditTransactionDialog
+    ),
+  { ssr: false }
+);
+
+const DeleteTransactionDialog = dynamic(
+  () =>
+    import("./delete-transaction-dialog").then(
+      (mod) => mod.DeleteTransactionDialog
+    ),
+  { ssr: false }
+);
 
 interface TransactionTableProps {
   initialTransactions: TransactionWithRelations[];
