@@ -56,9 +56,12 @@ export default async function DashboardLayout({
               >
                 Accounts
               </Link>
-              <span className="rounded-lg px-3 py-1.5 text-muted-foreground/60 cursor-not-allowed">
+              <Link
+                href="/transactions"
+                className="rounded-lg px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
                 Transactions
-              </span>
+              </Link>
               <span className="rounded-lg px-3 py-1.5 text-muted-foreground/60 cursor-not-allowed">
                 Budgets
               </span>
