@@ -216,14 +216,14 @@ export function CreateTransactionDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {trigger ? (
         <DialogTrigger asChild>{trigger}</DialogTrigger>
-      ) : (
+      ) : !isControlled ? (
         <DialogTrigger asChild>
           <Button className="gap-2 shadow-xs">
             <Plus className="h-4 w-4" />
             <span>Add Transaction</span>
           </Button>
         </DialogTrigger>
-      )}
+      ) : null}
 
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
