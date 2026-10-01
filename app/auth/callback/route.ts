@@ -1,27 +1,54 @@
 import { createClient } from "@/lib/supabase/server";
+import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const token_hash = searchParams.get("token_hash");
+  const type = searchParams.get("type") as EmailOtpType | null;
+  const error = searchParams.get("error");
+  const errorDescription = searchParams.get("error_description");
 
+  // Determine target redirection destination
+  let next = searchParams.get("next") ?? (type === "recovery" ? "/auth/reset-password" : "/dashboard");
+
+  // Prevent open redirect vulnerabilities: Ensure next is a safe relative path starting with single '/'
+  if (!next.startsWith("/") || next.startsWith("//") || next.includes("\\")) {
+    next = type === "recovery" ? "/auth/reset-password" : "/dashboard";
+  }
+
+  // Handle errors redirected from Supabase (e.g., expired or invalid token links)
+  if (error) {
+    const errorTarget = type === "recovery" ? "/auth/forgot-password" : "/login";
+    return NextResponse.redirect(
+      `${origin}${errorTarget}?error=${encodeURIComponent(errorDescription || error)}`
+    );
+  }
+
+  const supabase = await createClient();
+
+  // 1. PKCE Authorization Code Exchange (Server-side Auth Flow)
   if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      const forwardedHost = request.headers.get("x-forwarded-host");
-      const isLocalEnv = process.env.NODE_ENV === "development";
-      if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`);
-      } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`);
-      } else {
-        return NextResponse.redirect(`${origin}${next}`);
-      }
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    if (!exchangeError) {
+      return NextResponse.redirect(`${origin}${next}`);
     }
   }
 
-  // Return the user to an error page or login with instructions
-  return NextResponse.redirect(`${origin}/login?error=auth-callback-failed`);
+  // 2. Token Hash OTP Verification (Magic link / Token-based Recovery Flow)
+  if (token_hash && type) {
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      token_hash,
+      type,
+    });
+    if (!verifyError) {
+      return NextResponse.redirect(`${origin}${next}`);
+    }
+  }
+
+  // Fallback on failure: return to appropriate auth page with error notification
+  const fallbackTarget = type === "recovery" ? "/auth/forgot-password" : "/login";
+  return NextResponse.redirect(`${origin}${fallbackTarget}?error=auth-callback-failed`);
 }
+

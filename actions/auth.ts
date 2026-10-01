@@ -1,12 +1,17 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import {
   loginSchema,
   signupSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   type LoginInput,
   type SignupInput,
+  type ForgotPasswordInput,
+  type ResetPasswordInput,
 } from "@/lib/validations/auth";
 
 export interface AuthActionResult {
@@ -119,3 +124,121 @@ export async function logoutAction(): Promise<void> {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+/**
+ * REQUEST PASSWORD RESET ACTION
+ * Initiates a password reset flow by sending a recovery link via Supabase Auth.
+ * Returns a generic success response to prevent account enumeration.
+ */
+export async function requestPasswordResetAction(
+  input: ForgotPasswordInput
+): Promise<AuthActionResult> {
+  const result = forgotPasswordSchema.safeParse(input);
+  if (!result.success) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const field = issue.path[0] as string;
+      if (!fieldErrors[field]) {
+        fieldErrors[field] = [];
+      }
+      fieldErrors[field].push(issue.message);
+    }
+    return {
+      success: false,
+      error: result.error.issues[0]?.message || "Invalid email address",
+      fieldErrors,
+    };
+  }
+
+  const { email } = result.data;
+  const supabase = await createClient();
+
+  // Resolve application origin dynamically from incoming request headers
+  const headerList = await headers();
+  const host = headerList.get("x-forwarded-host") || headerList.get("host");
+  const proto = headerList.get("x-forwarded-proto") || (process.env.NODE_ENV === "development" ? "http" : "https");
+  const origin = host ? `${proto}://${host}` : (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+
+  const redirectTo = `${origin}/auth/callback?next=/auth/reset-password`;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) {
+    // Specific check for rate limiting
+    if (error.status === 429) {
+      return {
+        success: false,
+        error: "Too many reset requests. Please wait a few minutes before trying again.",
+      };
+    }
+    // Generic success returned to prevent account enumeration attacks
+  }
+
+  return {
+    success: true,
+    message:
+      "If an account exists for this email, you'll receive a password reset link.",
+  };
+}
+
+/**
+ * RESET PASSWORD ACTION
+ * Updates the user's password using the active authenticated recovery session.
+ */
+export async function resetPasswordAction(
+  input: ResetPasswordInput
+): Promise<AuthActionResult> {
+  const result = resetPasswordSchema.safeParse(input);
+  if (!result.success) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const field = issue.path[0] as string;
+      if (!fieldErrors[field]) {
+        fieldErrors[field] = [];
+      }
+      fieldErrors[field].push(issue.message);
+    }
+    return {
+      success: false,
+      error: result.error.issues[0]?.message || "Invalid password details",
+      fieldErrors,
+    };
+  }
+
+  const { password } = result.data;
+  const supabase = await createClient();
+
+  // 1. Verify active user recovery session exists
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return {
+      success: false,
+      error:
+        "Your password reset session has expired or is invalid. Please request a new reset link.",
+    };
+  }
+
+  // 2. Update password in Supabase Auth
+  const { error } = await supabase.auth.updateUser({
+    password,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message || "Failed to update password. Please try again.",
+    };
+  }
+
+  return {
+    success: true,
+    message: "Your password has been successfully reset. You can now sign in.",
+  };
+}
+
