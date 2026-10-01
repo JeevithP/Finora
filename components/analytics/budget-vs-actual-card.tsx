@@ -76,8 +76,8 @@ export function BudgetVsActualCard({
               Reconciliation of planned monthly allowances against actual net outflows
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right">
+          <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+            <div className="text-left sm:text-right">
               <span className="text-[11px] text-muted-foreground block">
                 Total Budgeted: {formatCurrency(totalBudgeted, defaultCurrency)}
               </span>

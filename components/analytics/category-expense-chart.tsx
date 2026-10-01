@@ -118,9 +118,9 @@ export function CategoryExpenseChart({
             <p>No category expenses recorded for this timeframe.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center min-w-0">
             {/* Donut Chart */}
-            <div className="md:col-span-5 h-[220px] flex items-center justify-center relative">
+            <div className="md:col-span-5 h-[220px] flex items-center justify-center relative min-w-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Tooltip
