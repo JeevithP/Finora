@@ -523,3 +523,208 @@ export async function deleteTransactionAction(
     data: data as unknown as TransactionWithRelations,
   };
 }
+
+export interface ExportTransactionsFilterInput {
+  searchQuery?: string;
+  selectedAccount?: string;
+  selectedType?: string;
+  selectedCategory?: string;
+}
+
+export interface ExportTransactionsResult {
+  success: boolean;
+  csvContent?: string;
+  filename?: string;
+  rowCount?: number;
+  isCapped?: boolean;
+  totalFound?: number;
+  error?: string;
+}
+
+function escapeCsvField(val: unknown): string {
+  if (val === null || val === undefined) return "";
+  const str = String(val);
+  if (
+    str.includes(",") ||
+    str.includes('"') ||
+    str.includes("\n") ||
+    str.includes("\r")
+  ) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+/**
+ * EXPORT FILTERED TRANSACTIONS TO CSV
+ * Queries the authoritative ledger matching active UI filters up to 5,000 records.
+ * Generates RFC 4180 compliant CSV text with UTF-8 BOM.
+ */
+export async function exportFilteredTransactionsAction(
+  filters?: ExportTransactionsFilterInput
+): Promise<ExportTransactionsResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Unauthorized. Please log in.",
+    };
+  }
+
+  const {
+    searchQuery = "",
+    selectedAccount = "all",
+    selectedType = "all",
+    selectedCategory = "all",
+  } = filters || {};
+
+  // Build query enforcing RLS via user_id
+  let query = supabase
+    .from("transactions")
+    .select(
+      "id, type, amount, date, description, notes, created_at, account_id, destination_account_id, category_id, account:accounts!transactions_account_id_fkey(id, name, currency), destination_account:accounts!transactions_destination_account_id_fkey(id, name, currency), category:categories(id, name)"
+    )
+    .eq("user_id", user.id)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  // Apply Account Filter
+  if (selectedAccount && selectedAccount !== "all") {
+    query = query.or(
+      `account_id.eq.${selectedAccount},destination_account_id.eq.${selectedAccount}`
+    );
+  }
+
+  // Apply Type Filter
+  if (
+    selectedType &&
+    selectedType !== "all" &&
+    ["income", "expense", "transfer", "refund"].includes(selectedType)
+  ) {
+    query = query.eq(
+      "type",
+      selectedType as "income" | "expense" | "transfer" | "refund"
+    );
+  }
+
+  // Apply Category Filter
+  if (selectedCategory && selectedCategory !== "all") {
+    query = query.eq("category_id", selectedCategory);
+  }
+
+  // Fetch up to 5,001 rows to detect if capped
+  query = query.limit(5001);
+
+  const { data, error } = await query;
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+
+  type RawExportTx = {
+    id: string;
+    type: string;
+    amount: number;
+    date: string;
+    description: string | null;
+    notes: string | null;
+    created_at: string;
+    account_id: string;
+    destination_account_id: string | null;
+    category_id: string | null;
+    account?: { id: string; name: string; currency: string } | null;
+    destination_account?: { id: string; name: string; currency: string } | null;
+    category?: { id: string; name: string } | null;
+  };
+
+  let rows = (data || []) as unknown as RawExportTx[];
+
+  // Apply search query filter matching client search semantics
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase().trim();
+    rows = rows.filter((tx) => {
+      const descMatch = (tx.description || "").toLowerCase().includes(q);
+      const notesMatch = (tx.notes || "").toLowerCase().includes(q);
+      const accMatch = (tx.account?.name || "").toLowerCase().includes(q);
+      const destMatch = (tx.destination_account?.name || "").toLowerCase().includes(q);
+      const catMatch = (tx.category?.name || "").toLowerCase().includes(q);
+      return descMatch || notesMatch || accMatch || destMatch || catMatch;
+    });
+  }
+
+  const totalFound = rows.length;
+  const isCapped = totalFound > 5000;
+  if (isCapped) {
+    rows = rows.slice(0, 5000);
+  }
+
+  // CSV Headers
+  const headers = [
+    "Date",
+    "Transaction ID",
+    "Type",
+    "Description",
+    "Amount",
+    "Currency",
+    "Account",
+    "Destination Account",
+    "Category",
+    "Notes",
+    "Created At",
+  ];
+
+  const csvLines: string[] = [headers.join(",")];
+
+  rows.forEach((tx) => {
+    const date = tx.date || "";
+    const id = tx.id;
+    const type = tx.type;
+    const description = tx.description || "";
+    const amount = Number(tx.amount || 0).toFixed(2);
+    const currency = tx.account?.currency || "INR";
+    const accountName = tx.account?.name || "";
+    const destAccountName =
+      tx.type === "transfer" ? tx.destination_account?.name || "" : "";
+    const categoryName =
+      tx.type === "transfer" ? "Transfer" : tx.category?.name || "";
+    const notes = tx.notes || "";
+    const createdAt = tx.created_at;
+
+    const line = [
+      escapeCsvField(date),
+      escapeCsvField(id),
+      escapeCsvField(type),
+      escapeCsvField(description),
+      escapeCsvField(amount),
+      escapeCsvField(currency),
+      escapeCsvField(accountName),
+      escapeCsvField(destAccountName),
+      escapeCsvField(categoryName),
+      escapeCsvField(notes),
+      escapeCsvField(createdAt),
+    ].join(",");
+
+    csvLines.push(line);
+  });
+
+  // Prepend UTF-8 BOM for Microsoft Excel / spreadsheet compatibility
+  const csvContent = "\uFEFF" + csvLines.join("\r\n");
+  const todayStr = new Date().toISOString().split("T")[0];
+  const filename = `finora-transactions-${todayStr}.csv`;
+
+  return {
+    success: true,
+    csvContent,
+    filename,
+    rowCount: rows.length,
+    isCapped,
+    totalFound,
+  };
+}

@@ -35,6 +35,7 @@ import {
 import dynamic from "next/dynamic";
 import { TransactionFilterBar } from "./transaction-filter-bar";
 import { TransactionEmptyState } from "./transaction-empty-state";
+import { ExportCsvButton } from "./export-csv-button";
 
 const CreateTransactionDialog = dynamic(
   () =>
@@ -236,6 +237,14 @@ export function TransactionTable({
         </div>
 
         <div className="flex items-center gap-3">
+          <ExportCsvButton
+            filters={{
+              searchQuery,
+              selectedAccount,
+              selectedType,
+              selectedCategory,
+            }}
+          />
           <Button
             onClick={() => setCreateOpen(true)}
             className="gap-2 shadow-xs"
