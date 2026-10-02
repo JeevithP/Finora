@@ -1,3 +1,5 @@
+import { FinancialInsight } from "@/lib/insights/types";
+
 export type AnalyticsPeriodKey =
   | "this_month"
   | "last_month"
@@ -83,4 +85,7 @@ export interface AnalyticsData {
   budgetVsActual: BudgetVsActualItem[];
   unbudgetedSpending: CategoryExpenseItem[];
   hasTransactions: boolean;
+  previousPeriodSummary?: AnalyticsSummary | null;
+  previousPeriodLabel?: string;
+  insights?: FinancialInsight[];
 }

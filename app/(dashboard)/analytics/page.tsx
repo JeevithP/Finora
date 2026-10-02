@@ -7,6 +7,7 @@ import { parsePeriodKey } from "@/lib/analytics/periods";
 import { getAnalyticsData } from "@/lib/analytics/queries";
 import { AnalyticsPeriodSelector } from "@/components/analytics/analytics-period-selector";
 import { AnalyticsSummaryCards } from "@/components/analytics/analytics-summary-cards";
+import { FinancialInsightsCard } from "@/components/insights/financial-insights-card";
 import { MonthlyTrendChart } from "@/components/analytics/monthly-trend-chart";
 import { CategoryExpenseChart } from "@/components/analytics/category-expense-chart";
 import { BudgetVsActualCard } from "@/components/analytics/budget-vs-actual-card";
@@ -78,6 +79,9 @@ export default async function AnalyticsPage({
             summary={data.summary}
             defaultCurrency={defaultCurrency}
           />
+
+          {/* Financial Insights Card */}
+          <FinancialInsightsCard insights={data.insights} />
 
           {/* Visual Charts Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">

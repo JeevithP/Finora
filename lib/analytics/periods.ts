@@ -167,3 +167,135 @@ export function getPeriodInterval(
     months,
   };
 }
+
+/**
+ * Computes the equivalent non-overlapping prior period interval
+ * for comparison and spending-change insights.
+ */
+export function getPreviousPeriodInterval(
+  periodKey: AnalyticsPeriodKey = "this_month",
+  referenceDate: Date = new Date()
+): PeriodInterval {
+  const currentYear = referenceDate.getFullYear();
+  const currentMonth = referenceDate.getMonth() + 1; // 1-12
+
+  let startDate = "";
+  let endDateExclusive = "";
+  let label = "Prior Period";
+  const months: MonthBucket[] = [];
+
+  switch (periodKey) {
+    case "this_month": {
+      // Prior period is Month - 1 (Last Month)
+      let prevYear = currentYear;
+      let prevMonth = currentMonth - 1;
+      if (prevMonth === 0) {
+        prevMonth = 12;
+        prevYear -= 1;
+      }
+      startDate = formatDate(prevYear, prevMonth, 1);
+      endDateExclusive = formatDate(currentYear, currentMonth, 1);
+      months.push(createMonthBucket(prevYear, prevMonth));
+      label = `Last Month (${months[0].label})`;
+      break;
+    }
+
+    case "last_month": {
+      // Prior period is Month - 2 (Month before last)
+      let m2Year = currentYear;
+      let m2Month = currentMonth - 2;
+      while (m2Month <= 0) {
+        m2Month += 12;
+        m2Year -= 1;
+      }
+
+      let m1Year = currentYear;
+      let m1Month = currentMonth - 1;
+      if (m1Month === 0) {
+        m1Month = 12;
+        m1Year -= 1;
+      }
+
+      startDate = formatDate(m2Year, m2Month, 1);
+      endDateExclusive = formatDate(m1Year, m1Month, 1);
+      months.push(createMonthBucket(m2Year, m2Month));
+      label = `Prior Month (${months[0].label})`;
+      break;
+    }
+
+    case "last_3_months": {
+      // Current is [current - 2, current - 1, current]
+      // Prior 3 months are [current - 5, current - 4, current - 3]
+      for (let i = 5; i >= 3; i--) {
+        let y = currentYear;
+        let m = currentMonth - i;
+        while (m <= 0) {
+          m += 12;
+          y -= 1;
+        }
+        months.push(createMonthBucket(y, m));
+      }
+
+      // End date is 1st of month (current - 2)
+      let endY = currentYear;
+      let endM = currentMonth - 2;
+      while (endM <= 0) {
+        endM += 12;
+        endY -= 1;
+      }
+
+      startDate = formatDate(months[0].year, months[0].month, 1);
+      endDateExclusive = formatDate(endY, endM, 1);
+      label = "Prior 3 Months";
+      break;
+    }
+
+    case "last_6_months": {
+      // Current is [current - 5, ..., current]
+      // Prior 6 months are [current - 11, ..., current - 6]
+      for (let i = 11; i >= 6; i--) {
+        let y = currentYear;
+        let m = currentMonth - i;
+        while (m <= 0) {
+          m += 12;
+          y -= 1;
+        }
+        months.push(createMonthBucket(y, m));
+      }
+
+      // End date is 1st of month (current - 5)
+      let endY = currentYear;
+      let endM = currentMonth - 5;
+      while (endM <= 0) {
+        endM += 12;
+        endY -= 1;
+      }
+
+      startDate = formatDate(months[0].year, months[0].month, 1);
+      endDateExclusive = formatDate(endY, endM, 1);
+      label = "Prior 6 Months";
+      break;
+    }
+
+    case "this_year": {
+      // Prior year is full Year - 1
+      const prevYear = currentYear - 1;
+      startDate = formatDate(prevYear, 1, 1);
+      endDateExclusive = formatDate(currentYear, 1, 1);
+
+      for (let m = 1; m <= 12; m++) {
+        months.push(createMonthBucket(prevYear, m));
+      }
+      label = `Prior Year (${prevYear})`;
+      break;
+    }
+  }
+
+  return {
+    key: periodKey,
+    label,
+    startDate,
+    endDateExclusive,
+    months,
+  };
+}

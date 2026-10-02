@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getPeriodInterval } from "./periods";
+import { getPeriodInterval, getPreviousPeriodInterval } from "./periods";
 import {
   AnalyticsData,
   AnalyticsPeriodKey,
@@ -9,6 +9,7 @@ import {
   MonthlyTrendPoint,
 } from "./types";
 import { Category } from "@/types/database.types";
+import { generateFinancialInsights } from "@/lib/insights/engine";
 
 interface RawAnalyticsTx {
   id: string;
@@ -52,13 +53,20 @@ export async function getAnalyticsData(
   periodKey: AnalyticsPeriodKey = "this_month"
 ): Promise<AnalyticsData> {
   const period = getPeriodInterval(periodKey);
+  const previousPeriod = getPreviousPeriodInterval(periodKey);
   const supabase = await createClient();
+
+  // Determine earliest start date across current and comparison periods
+  const earliestStartDate =
+    period.startDate < previousPeriod.startDate
+      ? period.startDate
+      : previousPeriod.startDate;
 
   // Extract unique years and months for budget lookup
   const years = Array.from(new Set(period.months.map((m) => m.year)));
   const months = Array.from(new Set(period.months.map((m) => m.month)));
 
-  // Parallel server fetches
+  // Parallel server fetches in a single database roundtrip
   const [txResult, budgetsResult, categoriesResult] = await Promise.all([
     supabase
       .from("transactions")
@@ -66,7 +74,7 @@ export async function getAnalyticsData(
         "id, type, amount, date, category_id, account:accounts!transactions_account_id_fkey(id, currency), category:categories(id, name, icon, color, type, is_system)"
       )
       .eq("user_id", userId)
-      .gte("date", period.startDate)
+      .gte("date", earliestStartDate)
       .lt("date", period.endDateExclusive),
 
     supabase
@@ -136,7 +144,7 @@ export async function getAnalyticsData(
     };
   });
 
-  // Track global summary aggregates
+  // Track global summary aggregates for CURRENT period
   let totalIncome = 0;
   let grossExpense = 0;
   let totalRefunds = 0;
@@ -144,76 +152,115 @@ export async function getAnalyticsData(
   let foreignTxCount = 0;
   const foreignCurrencies: Record<string, number> = {};
 
-  // 3. Process transactions
+  // Track summary aggregates for PREVIOUS period
+  let prevTotalIncome = 0;
+  let prevGrossExpense = 0;
+  let prevTotalRefunds = 0;
+  let prevBaseTxCount = 0;
+  let prevForeignTxCount = 0;
+  const prevForeignCurrencies: Record<string, number> = {};
+
+  // 3. Process transactions across current and previous intervals
   rawTransactions.forEach((tx) => {
     const txCurrency = (tx.account?.currency || defaultCurrency).toUpperCase();
     const isBaseCurrency = txCurrency === defaultCurrency.toUpperCase();
+    const amount = Number(tx.amount) || 0;
+    const txDate = tx.date;
 
-    if (!isBaseCurrency) {
-      foreignTxCount += 1;
-      foreignCurrencies[txCurrency] = (foreignCurrencies[txCurrency] || 0) + 1;
-      return; // Exclude foreign currency transactions from standard base totals
+    const isCurrent =
+      txDate >= period.startDate && txDate < period.endDateExclusive;
+    const isPrevious =
+      txDate >= previousPeriod.startDate &&
+      txDate < previousPeriod.endDateExclusive;
+
+    // Process Previous Period
+    if (isPrevious) {
+      if (!isBaseCurrency) {
+        prevForeignTxCount += 1;
+        prevForeignCurrencies[txCurrency] =
+          (prevForeignCurrencies[txCurrency] || 0) + 1;
+      } else {
+        if (tx.type === "income") {
+          prevBaseTxCount += 1;
+          prevTotalIncome += amount;
+        } else if (tx.type === "expense") {
+          prevBaseTxCount += 1;
+          prevGrossExpense += amount;
+        } else if (tx.type === "refund") {
+          prevBaseTxCount += 1;
+          prevTotalRefunds += amount;
+        }
+      }
     }
 
-    const amount = Number(tx.amount) || 0;
-    const monthKey = tx.date.slice(0, 7); // "YYYY-MM"
+    // Process Current Period
+    if (isCurrent) {
+      if (!isBaseCurrency) {
+        foreignTxCount += 1;
+        foreignCurrencies[txCurrency] =
+          (foreignCurrencies[txCurrency] || 0) + 1;
+        return; // Exclude foreign currency transactions from standard base totals
+      }
 
-    // Resolve category key and data
-    let catKey = tx.category_id;
-    if (!catKey) {
-      catKey = "uncategorized";
-      if (!catMap[catKey]) {
+      const monthKey = txDate.slice(0, 7); // "YYYY-MM"
+
+      // Resolve category key and data
+      let catKey = tx.category_id;
+      if (!catKey) {
+        catKey = "uncategorized";
+        if (!catMap[catKey]) {
+          catMap[catKey] = {
+            categoryId: null,
+            categoryName: "Uncategorized",
+            categoryIcon: "Tag",
+            categoryColor: "#64748b",
+            isSystem: false,
+            grossExpense: 0,
+            refunds: 0,
+            txCount: 0,
+          };
+        }
+      } else if (!catMap[catKey]) {
         catMap[catKey] = {
-          categoryId: null,
-          categoryName: "Uncategorized",
-          categoryIcon: "Tag",
-          categoryColor: "#64748b",
-          isSystem: false,
+          categoryId: tx.category_id,
+          categoryName: tx.category?.name || "Other Expense",
+          categoryIcon: tx.category?.icon || "Tag",
+          categoryColor: tx.category?.color || "#64748b",
+          isSystem: tx.category?.is_system || false,
           grossExpense: 0,
           refunds: 0,
           txCount: 0,
         };
       }
-    } else if (!catMap[catKey]) {
-      catMap[catKey] = {
-        categoryId: tx.category_id,
-        categoryName: tx.category?.name || "Other Expense",
-        categoryIcon: tx.category?.icon || "Tag",
-        categoryColor: tx.category?.color || "#64748b",
-        isSystem: tx.category?.is_system || false,
-        grossExpense: 0,
-        refunds: 0,
-        txCount: 0,
-      };
-    }
 
-    if (tx.type === "income") {
-      baseTxCount += 1;
-      totalIncome += amount;
-      if (monthlyMap[monthKey]) {
-        monthlyMap[monthKey].income += amount;
+      if (tx.type === "income") {
+        baseTxCount += 1;
+        totalIncome += amount;
+        if (monthlyMap[monthKey]) {
+          monthlyMap[monthKey].income += amount;
+        }
+      } else if (tx.type === "expense") {
+        baseTxCount += 1;
+        grossExpense += amount;
+        if (monthlyMap[monthKey]) {
+          monthlyMap[monthKey].grossExpense += amount;
+        }
+        catMap[catKey].grossExpense += amount;
+        catMap[catKey].txCount += 1;
+      } else if (tx.type === "refund") {
+        baseTxCount += 1;
+        totalRefunds += amount;
+        if (monthlyMap[monthKey]) {
+          monthlyMap[monthKey].refunds += amount;
+        }
+        catMap[catKey].refunds += amount;
+        catMap[catKey].txCount += 1;
       }
-    } else if (tx.type === "expense") {
-      baseTxCount += 1;
-      grossExpense += amount;
-      if (monthlyMap[monthKey]) {
-        monthlyMap[monthKey].grossExpense += amount;
-      }
-      catMap[catKey].grossExpense += amount;
-      catMap[catKey].txCount += 1;
-    } else if (tx.type === "refund") {
-      baseTxCount += 1;
-      totalRefunds += amount;
-      if (monthlyMap[monthKey]) {
-        monthlyMap[monthKey].refunds += amount;
-      }
-      catMap[catKey].refunds += amount;
-      catMap[catKey].txCount += 1;
+      // Transfers are zero-sum and intentionally ignored
     }
-    // Transfers are zero-sum and intentionally ignored
   });
 
-  // 4. Compute Final Summary Metrics
+  // 4. Compute Final Summary Metrics for CURRENT period
   const rawNetExpense = grossExpense - totalRefunds;
   const effectiveExpense = Math.max(0, rawNetExpense);
   const netCashFlow = totalIncome - effectiveExpense;
@@ -231,6 +278,26 @@ export async function getAnalyticsData(
     txCount: baseTxCount,
     foreignTxCount,
     foreignCurrencies,
+  };
+
+  // Compute Final Summary Metrics for PREVIOUS period
+  const prevRawNetExpense = prevGrossExpense - prevTotalRefunds;
+  const prevEffectiveExpense = Math.max(0, prevRawNetExpense);
+  const prevNetCashFlow = prevTotalIncome - prevEffectiveExpense;
+  const prevSavingsRate =
+    prevTotalIncome > 0 ? (prevNetCashFlow / prevTotalIncome) * 100 : 0;
+
+  const previousPeriodSummary: AnalyticsSummary = {
+    totalIncome: prevTotalIncome,
+    grossExpense: prevGrossExpense,
+    totalRefunds: prevTotalRefunds,
+    rawNetExpense: prevRawNetExpense,
+    effectiveExpense: prevEffectiveExpense,
+    netCashFlow: prevNetCashFlow,
+    savingsRate: prevSavingsRate,
+    txCount: prevBaseTxCount,
+    foreignTxCount: prevForeignTxCount,
+    foreignCurrencies: prevForeignCurrencies,
   };
 
   // 5. Finalize Monthly Trend Points
@@ -353,10 +420,9 @@ export async function getAnalyticsData(
     (item) => item.categoryId && !budgetedCatIds.has(item.categoryId)
   );
 
-  const hasTransactions =
-    baseTxCount > 0 || foreignTxCount > 0;
+  const hasTransactions = baseTxCount > 0 || foreignTxCount > 0;
 
-  return {
+  const analyticsDataWithoutInsights: AnalyticsData = {
     period,
     defaultCurrency,
     summary,
@@ -365,5 +431,22 @@ export async function getAnalyticsData(
     budgetVsActual,
     unbudgetedSpending,
     hasTransactions,
+    previousPeriodSummary,
+    previousPeriodLabel: previousPeriod.label,
+  };
+
+  // 9. Generate Deterministic Financial Insights
+  const insights = hasTransactions
+    ? generateFinancialInsights(
+        analyticsDataWithoutInsights,
+        previousPeriodSummary,
+        previousPeriod.label,
+        defaultCurrency
+      )
+    : [];
+
+  return {
+    ...analyticsDataWithoutInsights,
+    insights,
   };
 }
