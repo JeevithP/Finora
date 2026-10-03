@@ -21,7 +21,7 @@ export default async function DashboardPage() {
   const profile = await getUserProfile(user.id);
   const defaultCurrency = profile?.default_currency || "INR";
 
-  // Parallelize analytics, accounts, recent transactions, and categories
+  // Parallelize analytics, accounts, recent transactions (with exact count for onboarding state), and categories
   const [analyticsData, accountsResult, recentTxResult, categoriesResult] =
     await Promise.all([
       getAnalyticsData(user.id, defaultCurrency, "this_month"),
@@ -32,7 +32,7 @@ export default async function DashboardPage() {
         .order("name", { ascending: true }),
       supabase
         .from("transactions")
-        .select(TRANSACTION_SELECT_QUERY)
+        .select(TRANSACTION_SELECT_QUERY, { count: "exact" })
         .eq("user_id", user.id)
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
@@ -48,6 +48,10 @@ export default async function DashboardPage() {
   const recentTransactions = (recentTxResult.data ||
     []) as unknown as TransactionWithRelations[];
   const categories = (categoriesResult.data || []) as Category[];
+
+  // Authoritative existence of any transaction in ledger
+  const totalTxCount = recentTxResult.count ?? recentTransactions.length;
+  const hasTransactions = totalTxCount > 0 || analyticsData.hasTransactions;
 
   // Calculate Net Worth / Balance across active accounts in reporting currency
   const activeAccounts = accounts.filter((a) => !a.is_archived);
@@ -85,6 +89,7 @@ export default async function DashboardPage() {
       categories={categories}
       insights={analyticsData.insights || []}
       defaultCurrency={defaultCurrency}
+      hasTransactions={hasTransactions}
     />
   );
 }

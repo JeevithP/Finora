@@ -6,17 +6,18 @@ import { Landmark, ArrowRight, Plus } from "lucide-react";
 import { Account } from "@/types/database.types";
 import { formatCurrency } from "@/lib/formatters";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 interface DashboardAccountsSnapshotProps {
   accounts: Account[];
   defaultCurrency?: string;
+  onAddAccount?: () => void;
 }
 
 export function DashboardAccountsSnapshot({
   accounts = [],
   defaultCurrency = "INR",
+  onAddAccount,
 }: DashboardAccountsSnapshotProps) {
   const activeAccounts = accounts.filter((a) => !a.is_archived);
 
@@ -64,12 +65,29 @@ export function DashboardAccountsSnapshot({
                 Add your bank, credit card, cash, or investment accounts to begin tracking.
               </p>
             </div>
-            <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1.5 shadow-2xs">
-              <Link href="/accounts">
+            {onAddAccount ? (
+              <Button
+                onClick={onAddAccount}
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 shadow-2xs"
+              >
                 <Plus className="h-3.5 w-3.5" />
                 <span>Add Account</span>
-              </Link>
-            </Button>
+              </Button>
+            ) : (
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5 shadow-2xs"
+              >
+                <Link href="/accounts">
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add Account</span>
+                </Link>
+              </Button>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-border/50">
