@@ -221,6 +221,17 @@ export interface Database {
       };
     };
     Functions: {
+      fn_get_analytics_data: {
+        Args: {
+          p_start_date: string;
+          p_end_date_exclusive: string;
+          p_prev_start_date: string;
+          p_prev_end_date_exclusive: string;
+          p_default_currency?: string;
+          p_months?: Json;
+        };
+        Returns: Json;
+      };
       fn_adjust_account_balance: {
         Args: {
           p_account_id: string;

@@ -8,45 +8,93 @@ import {
   CategoryExpenseItem,
   MonthlyTrendPoint,
 } from "./types";
-import { Category } from "@/types/database.types";
+import { Json } from "@/types/database.types";
 import { generateFinancialInsights } from "@/lib/insights/engine";
 
-interface RawAnalyticsTx {
-  id: string;
-  type: "income" | "expense" | "transfer" | "refund";
-  amount: number;
-  date: string;
-  category_id: string | null;
-  account?: {
-    id: string;
-    currency: string;
-  } | null;
-  category?: {
-    id: string;
-    name: string;
-    icon: string;
-    color: string;
-    type: string;
-    is_system: boolean;
-  } | null;
+interface RpcAnalyticsResponse {
+  summary: {
+    totalIncome: number;
+    grossExpense: number;
+    totalRefunds: number;
+    rawNetExpense: number;
+    effectiveExpense: number;
+    netCashFlow: number;
+    savingsRate: number;
+    txCount: number;
+    foreignTxCount: number;
+    foreignCurrencies: Record<string, number>;
+  };
+  previousPeriodSummary: {
+    totalIncome: number;
+    grossExpense: number;
+    totalRefunds: number;
+    rawNetExpense: number;
+    effectiveExpense: number;
+    netCashFlow: number;
+    savingsRate: number;
+    txCount: number;
+    foreignTxCount: number;
+    foreignCurrencies: Record<string, number>;
+  };
+  monthlyTrend: {
+    year: number;
+    month: number;
+    key: string;
+    label: string;
+    income: number;
+    grossExpense: number;
+    refunds: number;
+    rawNetExpense: number;
+    effectiveExpense: number;
+    netCashFlow: number;
+  }[];
+  categoryBreakdown: {
+    categoryId: string | null;
+    categoryName: string;
+    categoryIcon: string;
+    categoryColor: string;
+    isSystem: boolean;
+    grossExpense: number;
+    refunds: number;
+    rawNetExpense: number;
+    effectiveExpense: number;
+    percentageOfTotal: number;
+    txCount: number;
+  }[];
+  budgetVsActual: {
+    categoryId: string;
+    categoryName: string;
+    categoryIcon: string;
+    categoryColor: string;
+    budgetedAmount: number;
+    actualSpent: number;
+    rawNetSpent: number;
+    variance: number;
+    percentageSpent: number;
+    isOverBudget: boolean;
+    hasBudget: boolean;
+  }[];
+  unbudgetedSpending: {
+    categoryId: string | null;
+    categoryName: string;
+    categoryIcon: string;
+    categoryColor: string;
+    isSystem: boolean;
+    grossExpense: number;
+    refunds: number;
+    rawNetExpense: number;
+    effectiveExpense: number;
+    percentageOfTotal: number;
+    txCount: number;
+  }[];
+  hasTransactions: boolean;
 }
 
-interface RawBudgetRow {
-  id: string;
-  category_id: string;
-  amount: number;
-  month: number;
-  year: number;
-  category?: {
-    id: string;
-    name: string;
-    icon: string;
-    color: string;
-    type: string;
-    is_system: boolean;
-  } | null;
-}
-
+/**
+ * Executes high-performance database-side analytics aggregation via the
+ * public.fn_get_analytics_data PostgreSQL RPC, preserving exact financial semantics
+ * with strict fail-closed error handling.
+ */
 export async function getAnalyticsData(
   userId: string,
   defaultCurrency: string = "INR",
@@ -56,378 +104,113 @@ export async function getAnalyticsData(
   const previousPeriod = getPreviousPeriodInterval(periodKey);
   const supabase = await createClient();
 
-  // Determine earliest start date across current and comparison periods
-  const earliestStartDate =
-    period.startDate < previousPeriod.startDate
-      ? period.startDate
-      : previousPeriod.startDate;
-
-  // Extract unique years and months for budget lookup
-  const years = Array.from(new Set(period.months.map((m) => m.year)));
-  const months = Array.from(new Set(period.months.map((m) => m.month)));
-
-  // Parallel server fetches in a single database roundtrip
-  const [txResult, budgetsResult, categoriesResult] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select(
-        "id, type, amount, date, category_id, account:accounts!transactions_account_id_fkey(id, currency), category:categories(id, name, icon, color, type, is_system)"
-      )
-      .eq("user_id", userId)
-      .gte("date", earliestStartDate)
-      .lt("date", period.endDateExclusive),
-
-    supabase
-      .from("budgets")
-      .select(
-        "id, category_id, amount, month, year, category:categories(id, name, icon, color, type, is_system)"
-      )
-      .eq("user_id", userId)
-      .in("year", years)
-      .in("month", months),
-
-    supabase
-      .from("categories")
-      .select("id, name, icon, color, type, is_system")
-      .eq("type", "expense")
-      .or(`user_id.eq.${userId},is_system.eq.true`)
-      .order("name", { ascending: true }),
-  ]);
-
-  const rawTransactions = (txResult.data || []) as unknown as RawAnalyticsTx[];
-  const rawBudgets = (budgetsResult.data || []) as unknown as RawBudgetRow[];
-  const allExpenseCategories = (categoriesResult.data || []) as Category[];
-
-  // 1. Initialize monthly trend buckets
-  const monthlyMap: Record<string, MonthlyTrendPoint> = {};
-  period.months.forEach((m) => {
-    monthlyMap[m.key] = {
-      year: m.year,
-      month: m.month,
-      key: m.key,
-      label: m.label,
-      income: 0,
-      grossExpense: 0,
-      refunds: 0,
-      rawNetExpense: 0,
-      effectiveExpense: 0,
-      netCashFlow: 0,
-    };
+  const { data, error } = await supabase.rpc("fn_get_analytics_data", {
+    p_start_date: period.startDate,
+    p_end_date_exclusive: period.endDateExclusive,
+    p_prev_start_date: previousPeriod.startDate,
+    p_prev_end_date_exclusive: previousPeriod.endDateExclusive,
+    p_default_currency: defaultCurrency,
+    p_months: period.months as unknown as Json,
   });
 
-  // 2. Initialize category tracking map
-  const catMap: Record<
-    string,
-    {
-      categoryId: string | null;
-      categoryName: string;
-      categoryIcon: string;
-      categoryColor: string;
-      isSystem: boolean;
-      grossExpense: number;
-      refunds: number;
-      txCount: number;
-    }
-  > = {};
+  if (error) {
+    throw new Error(`Failed to load analytics data: ${error.message}`);
+  }
 
-  // Pre-seed known expense categories so they are readily available
-  allExpenseCategories.forEach((cat) => {
-    catMap[cat.id] = {
-      categoryId: cat.id,
-      categoryName: cat.name,
-      categoryIcon: cat.icon || "Tag",
-      categoryColor: cat.color || "#64748b",
-      isSystem: cat.is_system,
-      grossExpense: 0,
-      refunds: 0,
-      txCount: 0,
-    };
-  });
-
-  // Track global summary aggregates for CURRENT period
-  let totalIncome = 0;
-  let grossExpense = 0;
-  let totalRefunds = 0;
-  let baseTxCount = 0;
-  let foreignTxCount = 0;
-  const foreignCurrencies: Record<string, number> = {};
-
-  // Track summary aggregates for PREVIOUS period
-  let prevTotalIncome = 0;
-  let prevGrossExpense = 0;
-  let prevTotalRefunds = 0;
-  let prevBaseTxCount = 0;
-  let prevForeignTxCount = 0;
-  const prevForeignCurrencies: Record<string, number> = {};
-
-  // 3. Process transactions across current and previous intervals
-  rawTransactions.forEach((tx) => {
-    const txCurrency = (tx.account?.currency || defaultCurrency).toUpperCase();
-    const isBaseCurrency = txCurrency === defaultCurrency.toUpperCase();
-    const amount = Number(tx.amount) || 0;
-    const txDate = tx.date;
-
-    const isCurrent =
-      txDate >= period.startDate && txDate < period.endDateExclusive;
-    const isPrevious =
-      txDate >= previousPeriod.startDate &&
-      txDate < previousPeriod.endDateExclusive;
-
-    // Process Previous Period
-    if (isPrevious) {
-      if (!isBaseCurrency) {
-        prevForeignTxCount += 1;
-        prevForeignCurrencies[txCurrency] =
-          (prevForeignCurrencies[txCurrency] || 0) + 1;
-      } else {
-        if (tx.type === "income") {
-          prevBaseTxCount += 1;
-          prevTotalIncome += amount;
-        } else if (tx.type === "expense") {
-          prevBaseTxCount += 1;
-          prevGrossExpense += amount;
-        } else if (tx.type === "refund") {
-          prevBaseTxCount += 1;
-          prevTotalRefunds += amount;
-        }
-      }
-    }
-
-    // Process Current Period
-    if (isCurrent) {
-      if (!isBaseCurrency) {
-        foreignTxCount += 1;
-        foreignCurrencies[txCurrency] =
-          (foreignCurrencies[txCurrency] || 0) + 1;
-        return; // Exclude foreign currency transactions from standard base totals
-      }
-
-      const monthKey = txDate.slice(0, 7); // "YYYY-MM"
-
-      // Resolve category key and data
-      let catKey = tx.category_id;
-      if (!catKey) {
-        catKey = "uncategorized";
-        if (!catMap[catKey]) {
-          catMap[catKey] = {
-            categoryId: null,
-            categoryName: "Uncategorized",
-            categoryIcon: "Tag",
-            categoryColor: "#64748b",
-            isSystem: false,
-            grossExpense: 0,
-            refunds: 0,
-            txCount: 0,
-          };
-        }
-      } else if (!catMap[catKey]) {
-        catMap[catKey] = {
-          categoryId: tx.category_id,
-          categoryName: tx.category?.name || "Other Expense",
-          categoryIcon: tx.category?.icon || "Tag",
-          categoryColor: tx.category?.color || "#64748b",
-          isSystem: tx.category?.is_system || false,
-          grossExpense: 0,
-          refunds: 0,
-          txCount: 0,
-        };
-      }
-
-      if (tx.type === "income") {
-        baseTxCount += 1;
-        totalIncome += amount;
-        if (monthlyMap[monthKey]) {
-          monthlyMap[monthKey].income += amount;
-        }
-      } else if (tx.type === "expense") {
-        baseTxCount += 1;
-        grossExpense += amount;
-        if (monthlyMap[monthKey]) {
-          monthlyMap[monthKey].grossExpense += amount;
-        }
-        catMap[catKey].grossExpense += amount;
-        catMap[catKey].txCount += 1;
-      } else if (tx.type === "refund") {
-        baseTxCount += 1;
-        totalRefunds += amount;
-        if (monthlyMap[monthKey]) {
-          monthlyMap[monthKey].refunds += amount;
-        }
-        catMap[catKey].refunds += amount;
-        catMap[catKey].txCount += 1;
-      }
-      // Transfers are zero-sum and intentionally ignored
-    }
-  });
-
-  // 4. Compute Final Summary Metrics for CURRENT period
-  const rawNetExpense = grossExpense - totalRefunds;
-  const effectiveExpense = Math.max(0, rawNetExpense);
-  const netCashFlow = totalIncome - effectiveExpense;
-  const savingsRate =
-    totalIncome > 0 ? (netCashFlow / totalIncome) * 100 : 0;
+  const rpcData = data as unknown as RpcAnalyticsResponse;
+  if (!rpcData || !rpcData.summary) {
+    throw new Error("Invalid analytics payload returned from database");
+  }
 
   const summary: AnalyticsSummary = {
-    totalIncome,
-    grossExpense,
-    totalRefunds,
-    rawNetExpense,
-    effectiveExpense,
-    netCashFlow,
-    savingsRate,
-    txCount: baseTxCount,
-    foreignTxCount,
-    foreignCurrencies,
+    totalIncome: Number(rpcData.summary.totalIncome) || 0,
+    grossExpense: Number(rpcData.summary.grossExpense) || 0,
+    totalRefunds: Number(rpcData.summary.totalRefunds) || 0,
+    rawNetExpense: Number(rpcData.summary.rawNetExpense) || 0,
+    effectiveExpense: Number(rpcData.summary.effectiveExpense) || 0,
+    netCashFlow: Number(rpcData.summary.netCashFlow) || 0,
+    savingsRate: Number(rpcData.summary.savingsRate) || 0,
+    txCount: Number(rpcData.summary.txCount) || 0,
+    foreignTxCount: Number(rpcData.summary.foreignTxCount) || 0,
+    foreignCurrencies: (rpcData.summary.foreignCurrencies || {}) as Record<string, number>,
   };
-
-  // Compute Final Summary Metrics for PREVIOUS period
-  const prevRawNetExpense = prevGrossExpense - prevTotalRefunds;
-  const prevEffectiveExpense = Math.max(0, prevRawNetExpense);
-  const prevNetCashFlow = prevTotalIncome - prevEffectiveExpense;
-  const prevSavingsRate =
-    prevTotalIncome > 0 ? (prevNetCashFlow / prevTotalIncome) * 100 : 0;
 
   const previousPeriodSummary: AnalyticsSummary = {
-    totalIncome: prevTotalIncome,
-    grossExpense: prevGrossExpense,
-    totalRefunds: prevTotalRefunds,
-    rawNetExpense: prevRawNetExpense,
-    effectiveExpense: prevEffectiveExpense,
-    netCashFlow: prevNetCashFlow,
-    savingsRate: prevSavingsRate,
-    txCount: prevBaseTxCount,
-    foreignTxCount: prevForeignTxCount,
-    foreignCurrencies: prevForeignCurrencies,
+    totalIncome: Number(rpcData.previousPeriodSummary.totalIncome) || 0,
+    grossExpense: Number(rpcData.previousPeriodSummary.grossExpense) || 0,
+    totalRefunds: Number(rpcData.previousPeriodSummary.totalRefunds) || 0,
+    rawNetExpense: Number(rpcData.previousPeriodSummary.rawNetExpense) || 0,
+    effectiveExpense: Number(rpcData.previousPeriodSummary.effectiveExpense) || 0,
+    netCashFlow: Number(rpcData.previousPeriodSummary.netCashFlow) || 0,
+    savingsRate: Number(rpcData.previousPeriodSummary.savingsRate) || 0,
+    txCount: Number(rpcData.previousPeriodSummary.txCount) || 0,
+    foreignTxCount: Number(rpcData.previousPeriodSummary.foreignTxCount) || 0,
+    foreignCurrencies: (rpcData.previousPeriodSummary.foreignCurrencies || {}) as Record<string, number>,
   };
 
-  // 5. Finalize Monthly Trend Points
-  const monthlyTrend: MonthlyTrendPoint[] = period.months.map((m) => {
-    const bucket = monthlyMap[m.key];
-    const bRawNet = bucket.grossExpense - bucket.refunds;
-    const bEffective = Math.max(0, bRawNet);
-    const bNetFlow = bucket.income - bEffective;
+  const monthlyTrend: MonthlyTrendPoint[] = (rpcData.monthlyTrend || []).map((m) => ({
+    year: Number(m.year),
+    month: Number(m.month),
+    key: String(m.key),
+    label: String(m.label),
+    income: Number(m.income) || 0,
+    grossExpense: Number(m.grossExpense) || 0,
+    refunds: Number(m.refunds) || 0,
+    rawNetExpense: Number(m.rawNetExpense) || 0,
+    effectiveExpense: Number(m.effectiveExpense) || 0,
+    netCashFlow: Number(m.netCashFlow) || 0,
+  }));
 
-    return {
-      ...bucket,
-      rawNetExpense: bRawNet,
-      effectiveExpense: bEffective,
-      netCashFlow: bNetFlow,
-    };
-  });
+  const categoryBreakdown: CategoryExpenseItem[] = (rpcData.categoryBreakdown || []).map((c) => ({
+    categoryId: c.categoryId || null,
+    categoryName: String(c.categoryName || "Uncategorized"),
+    categoryIcon: String(c.categoryIcon || "Tag"),
+    categoryColor: String(c.categoryColor || "#64748b"),
+    isSystem: Boolean(c.isSystem),
+    grossExpense: Number(c.grossExpense) || 0,
+    refunds: Number(c.refunds) || 0,
+    rawNetExpense: Number(c.rawNetExpense) || 0,
+    effectiveExpense: Number(c.effectiveExpense) || 0,
+    percentageOfTotal: Number(c.percentageOfTotal) || 0,
+    txCount: Number(c.txCount) || 0,
+  }));
 
-  // 6. Finalize Category Breakdown
-  const categoryBreakdownList: CategoryExpenseItem[] = [];
-  let totalEffectiveForPercentages = 0;
+  const budgetVsActual: BudgetVsActualItem[] = (rpcData.budgetVsActual || []).map((b) => ({
+    categoryId: String(b.categoryId),
+    categoryName: String(b.categoryName || "Expense"),
+    categoryIcon: String(b.categoryIcon || "Tag"),
+    categoryColor: String(b.categoryColor || "#64748b"),
+    budgetedAmount: Number(b.budgetedAmount) || 0,
+    actualSpent: Number(b.actualSpent) || 0,
+    rawNetSpent: Number(b.rawNetSpent) || 0,
+    variance: Number(b.variance) || 0,
+    percentageSpent: Number(b.percentageSpent) || 0,
+    isOverBudget: Boolean(b.isOverBudget),
+    hasBudget: Boolean(b.hasBudget),
+  }));
 
-  Object.values(catMap).forEach((item) => {
-    if (item.grossExpense > 0 || item.refunds > 0) {
-      const cRawNet = item.grossExpense - item.refunds;
-      const cEffective = Math.max(0, cRawNet);
-      totalEffectiveForPercentages += cEffective;
+  const unbudgetedSpending: CategoryExpenseItem[] = (rpcData.unbudgetedSpending || []).map((u) => ({
+    categoryId: u.categoryId || null,
+    categoryName: String(u.categoryName || "Uncategorized"),
+    categoryIcon: String(u.categoryIcon || "Tag"),
+    categoryColor: String(u.categoryColor || "#64748b"),
+    isSystem: Boolean(u.isSystem),
+    grossExpense: Number(u.grossExpense) || 0,
+    refunds: Number(u.refunds) || 0,
+    rawNetExpense: Number(u.rawNetExpense) || 0,
+    effectiveExpense: Number(u.effectiveExpense) || 0,
+    percentageOfTotal: Number(u.percentageOfTotal) || 0,
+    txCount: Number(u.txCount) || 0,
+  }));
 
-      categoryBreakdownList.push({
-        categoryId: item.categoryId,
-        categoryName: item.categoryName,
-        categoryIcon: item.categoryIcon,
-        categoryColor: item.categoryColor,
-        isSystem: item.isSystem,
-        grossExpense: item.grossExpense,
-        refunds: item.refunds,
-        rawNetExpense: cRawNet,
-        effectiveExpense: cEffective,
-        percentageOfTotal: 0, // Assigned below
-        txCount: item.txCount,
-      });
-    }
-  });
-
-  // Assign percentages and sort descending by effectiveExpense
-  categoryBreakdownList.forEach((item) => {
-    item.percentageOfTotal =
-      totalEffectiveForPercentages > 0
-        ? (item.effectiveExpense / totalEffectiveForPercentages) * 100
-        : 0;
-  });
-  categoryBreakdownList.sort(
-    (a, b) => b.effectiveExpense - a.effectiveExpense
-  );
-
-  // 7. Reconcile Budget vs Actual
-  // Filter budgets to only those that fall within the exact month/year list of the period
-  const validPeriodMonthKeys = new Set(period.months.map((m) => m.key));
-  const activeBudgets = rawBudgets.filter((b) =>
-    validPeriodMonthKeys.has(`${b.year}-${String(b.month).padStart(2, "0")}`)
-  );
-
-  // Group budgets by category_id across the period (SUM multi-month budgets)
-  const budgetSumMap: Record<
-    string,
-    {
-      categoryId: string;
-      categoryName: string;
-      categoryIcon: string;
-      categoryColor: string;
-      budgetedAmount: number;
-    }
-  > = {};
-
-  activeBudgets.forEach((b) => {
-    if (!budgetSumMap[b.category_id]) {
-      const catMeta = catMap[b.category_id];
-      budgetSumMap[b.category_id] = {
-        categoryId: b.category_id,
-        categoryName: b.category?.name || catMeta?.categoryName || "Expense",
-        categoryIcon: b.category?.icon || catMeta?.categoryIcon || "Tag",
-        categoryColor: b.category?.color || catMeta?.categoryColor || "#64748b",
-        budgetedAmount: 0,
-      };
-    }
-    budgetSumMap[b.category_id].budgetedAmount += Number(b.amount) || 0;
-  });
-
-  const budgetVsActual: BudgetVsActualItem[] = [];
-  const budgetedCatIds = new Set<string>();
-
-  Object.values(budgetSumMap).forEach((b) => {
-    budgetedCatIds.add(b.categoryId);
-    const catSpend = catMap[b.categoryId];
-    const rawNetSpent = catSpend ? catSpend.grossExpense - catSpend.refunds : 0;
-    const actualSpent = Math.max(0, rawNetSpent);
-    const variance = b.budgetedAmount - actualSpent;
-    const percentageSpent =
-      b.budgetedAmount > 0 ? (actualSpent / b.budgetedAmount) * 100 : 0;
-
-    budgetVsActual.push({
-      categoryId: b.categoryId,
-      categoryName: b.categoryName,
-      categoryIcon: b.categoryIcon,
-      categoryColor: b.categoryColor,
-      budgetedAmount: b.budgetedAmount,
-      actualSpent,
-      rawNetSpent,
-      variance,
-      percentageSpent,
-      isOverBudget: actualSpent > b.budgetedAmount,
-      hasBudget: true,
-    });
-  });
-
-  // Sort budget vs actual by percentageSpent descending
-  budgetVsActual.sort((a, b) => b.percentageSpent - a.percentageSpent);
-
-  // 8. Find Unbudgeted Expenses (Categories that had spending but no budget)
-  const unbudgetedSpending: CategoryExpenseItem[] = categoryBreakdownList.filter(
-    (item) => item.categoryId && !budgetedCatIds.has(item.categoryId)
-  );
-
-  const hasTransactions = baseTxCount > 0 || foreignTxCount > 0;
+  const hasTransactions = Boolean(rpcData.hasTransactions);
 
   const analyticsDataWithoutInsights: AnalyticsData = {
     period,
     defaultCurrency,
     summary,
     monthlyTrend,
-    categoryBreakdown: categoryBreakdownList,
+    categoryBreakdown,
     budgetVsActual,
     unbudgetedSpending,
     hasTransactions,
@@ -435,7 +218,6 @@ export async function getAnalyticsData(
     previousPeriodLabel: previousPeriod.label,
   };
 
-  // 9. Generate Deterministic Financial Insights
   const insights = hasTransactions
     ? generateFinancialInsights(
         analyticsDataWithoutInsights,
