@@ -197,3 +197,93 @@ export const transactionQuerySchema = z.object({
 });
 
 export type TransactionQueryInput = z.infer<typeof transactionQuerySchema>;
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Zod schema for URL search parameters on the /transactions page
+ */
+export const transactionSearchParamsSchema = z.object({
+  q: z.string().trim().max(100).optional().default(""),
+  account: z
+    .string()
+    .trim()
+    .refine((val) => val === "all" || UUID_REGEX.test(val), {
+      message: "Invalid account identifier",
+    })
+    .optional()
+    .default("all"),
+  category: z
+    .string()
+    .trim()
+    .refine(
+      (val) => val === "all" || val === "uncategorized" || UUID_REGEX.test(val),
+      {
+        message: "Invalid category identifier",
+      }
+    )
+    .optional()
+    .default("all"),
+  type: z
+    .enum(["all", "income", "expense", "transfer", "refund"])
+    .optional()
+    .default("all"),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .refine((val) => [10, 25, 50, 100].includes(val), {
+      message: "Invalid page size",
+    })
+    .optional()
+    .default(25),
+});
+
+export type TransactionSearchParams = z.infer<
+  typeof transactionSearchParamsSchema
+>;
+
+export function parseTransactionSearchParams(
+  rawParams: Record<string, string | string[] | undefined>
+): TransactionSearchParams {
+  const getSingle = (val: string | string[] | undefined) =>
+    Array.isArray(val) ? val[0] : val;
+
+  const candidate = {
+    q: getSingle(rawParams.q),
+    account: getSingle(rawParams.account),
+    category: getSingle(rawParams.category),
+    type: getSingle(rawParams.type),
+    page: getSingle(rawParams.page),
+    pageSize: getSingle(rawParams.pageSize),
+  };
+
+  const parsed = transactionSearchParamsSchema.safeParse(candidate);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  // Gracefully fallback to safe defaults if invalid input is provided
+  const rawAcc = typeof candidate.account === "string" ? candidate.account.trim() : "all";
+  const safeAccount = rawAcc !== "all" && UUID_REGEX.test(rawAcc) ? rawAcc : "all";
+
+  const rawCat = typeof candidate.category === "string" ? candidate.category.trim() : "all";
+  const safeCategory =
+    rawCat === "uncategorized" || (rawCat !== "all" && UUID_REGEX.test(rawCat))
+      ? rawCat
+      : "all";
+
+  return {
+    q: typeof candidate.q === "string" ? candidate.q.slice(0, 100).trim() : "",
+    account: safeAccount,
+    category: safeCategory,
+    type: ["income", "expense", "transfer", "refund"].includes(candidate.type as string)
+      ? (candidate.type as "income" | "expense" | "transfer" | "refund")
+      : "all",
+    page: Math.max(1, parseInt(String(candidate.page), 10) || 1),
+    pageSize: [10, 25, 50, 100].includes(parseInt(String(candidate.pageSize), 10))
+      ? parseInt(String(candidate.pageSize), 10)
+      : 25,
+  };
+}

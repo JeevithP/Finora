@@ -48,13 +48,13 @@ export function TransactionFilterBar({
     setLocalSearch(searchQuery);
   }, [searchQuery]);
 
-  // Debounce search query changes by 250ms
+  // Debounce search query changes by 300ms
   React.useEffect(() => {
     const timer = setTimeout(() => {
       if (localSearch !== searchQuery) {
         onSearchChange(localSearch);
       }
-    }, 250);
+    }, 300);
     return () => clearTimeout(timer);
   }, [localSearch, searchQuery, onSearchChange]);
 

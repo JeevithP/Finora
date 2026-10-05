@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import React, { useState, useTransition } from "react";
 import {
   MoreVertical,
   Edit3,
@@ -36,6 +37,7 @@ import dynamic from "next/dynamic";
 import { TransactionFilterBar } from "./transaction-filter-bar";
 import { TransactionEmptyState } from "./transaction-empty-state";
 import { ExportCsvButton } from "./export-csv-button";
+import { TransactionPagination } from "./transaction-pagination";
 
 const CreateTransactionDialog = dynamic(
   () =>
@@ -66,6 +68,17 @@ interface TransactionTableProps {
   accounts: Account[];
   categories: Category[];
   defaultCurrency?: string;
+  totalCount: number;
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
+  hasAnyTransactions: boolean;
+  filters: {
+    q: string;
+    account: string;
+    category: string;
+    type: string;
+  };
 }
 
 export function TransactionTable({
@@ -73,11 +86,16 @@ export function TransactionTable({
   accounts,
   categories,
   defaultCurrency = "INR",
+  totalCount,
+  currentPage,
+  pageSize,
+  totalPages,
+  hasAnyTransactions,
+  filters,
 }: TransactionTableProps) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedAccount, setSelectedAccount] = useState("all");
-  const [selectedType, setSelectedType] = useState("all");
-  const [selectedCategory, setSelectedCategory] = useState("all");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] =
@@ -85,68 +103,61 @@ export function TransactionTable({
   const [deletingTransaction, setDeletingTransaction] =
     useState<TransactionWithRelations | null>(null);
 
-  // Client-side filtering logic
-  const filteredTransactions = useMemo(() => {
-    return initialTransactions.filter((tx) => {
-      // 1. Search Query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const descMatch = (tx.description || "").toLowerCase().includes(q);
-        const notesMatch = (tx.notes || "").toLowerCase().includes(q);
-        const accMatch = (tx.account?.name || "").toLowerCase().includes(q);
-        const destMatch = (tx.destination_account?.name || "").toLowerCase().includes(q);
-        const catMatch = (tx.category?.name || "").toLowerCase().includes(q);
-        if (!descMatch && !notesMatch && !accMatch && !destMatch && !catMatch) {
-          return false;
-        }
+  const updateUrl = (
+    updates: Record<string, string | number | undefined>,
+    resetPage = true
+  ) => {
+    startTransition(() => {
+      const current = new URLSearchParams(searchParams?.toString() || "");
+
+      if (resetPage) {
+        current.delete("page");
       }
 
-      // 2. Account Filter (Source or Destination)
-      if (selectedAccount !== "all") {
+      for (const [key, value] of Object.entries(updates)) {
         if (
-          tx.account_id !== selectedAccount &&
-          tx.destination_account_id !== selectedAccount
+          value === undefined ||
+          value === "" ||
+          value === "all" ||
+          (key === "page" && Number(value) === 1) ||
+          (key === "pageSize" && Number(value) === 25)
         ) {
-          return false;
+          current.delete(key);
+        } else {
+          current.set(key, String(value));
         }
       }
 
-      // 3. Type Filter
-      if (selectedType !== "all") {
-        if (tx.type !== selectedType) {
-          return false;
-        }
-      }
-
-      // 4. Category Filter
-      if (selectedCategory !== "all") {
-        if (tx.category_id !== selectedCategory) {
-          return false;
-        }
-      }
-
-      return true;
+      const queryString = current.toString();
+      router.replace(`/transactions${queryString ? `?${queryString}` : ""}`, {
+        scroll: false,
+      });
     });
-  }, [
-    initialTransactions,
-    searchQuery,
-    selectedAccount,
-    selectedType,
-    selectedCategory,
-  ]);
+  };
 
-  const resetFilters = () => {
-    setSearchQuery("");
-    setSelectedAccount("all");
-    setSelectedType("all");
-    setSelectedCategory("all");
+  const handleSearchChange = (q: string) => updateUrl({ q }, true);
+  const handleAccountChange = (account: string) => updateUrl({ account }, true);
+  const handleTypeChange = (type: string) => updateUrl({ type }, true);
+  const handleCategoryChange = (category: string) =>
+    updateUrl({ category }, true);
+  const handlePageChange = (page: number) => updateUrl({ page }, false);
+  const handlePageSizeChange = (newPageSize: number) =>
+    updateUrl({ pageSize: newPageSize }, true);
+
+  const handleResetFilters = () => {
+    startTransition(() => {
+      router.replace("/transactions", { scroll: false });
+    });
   };
 
   const isFiltered =
-    searchQuery.trim() !== "" ||
-    selectedAccount !== "all" ||
-    selectedType !== "all" ||
-    selectedCategory !== "all";
+    Boolean(filters.q.trim()) ||
+    filters.account !== "all" ||
+    filters.type !== "all" ||
+    filters.category !== "all" ||
+    currentPage > 1 ||
+    pageSize !== 25;
+
 
   // Helper for type badges
   const renderTypeBadge = (type: string) => {
@@ -239,10 +250,10 @@ export function TransactionTable({
         <div className="flex items-center gap-3">
           <ExportCsvButton
             filters={{
-              searchQuery,
-              selectedAccount,
-              selectedType,
-              selectedCategory,
+              searchQuery: filters.q,
+              selectedAccount: filters.account,
+              selectedType: filters.type,
+              selectedCategory: filters.category,
             }}
           />
           <Button
@@ -255,7 +266,7 @@ export function TransactionTable({
         </div>
       </div>
 
-      {initialTransactions.length === 0 ? (
+      {!hasAnyTransactions ? (
         <TransactionEmptyState
           onAddTransaction={() => setCreateOpen(true)}
         />
@@ -265,21 +276,21 @@ export function TransactionTable({
           <TransactionFilterBar
             accounts={accounts}
             categories={categories}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            selectedAccount={selectedAccount}
-            onAccountChange={setSelectedAccount}
-            selectedType={selectedType}
-            onTypeChange={setSelectedType}
-            selectedCategory={selectedCategory}
-            onCategoryChange={setSelectedCategory}
-            onResetFilters={resetFilters}
+            searchQuery={filters.q}
+            onSearchChange={handleSearchChange}
+            selectedAccount={filters.account}
+            onAccountChange={handleAccountChange}
+            selectedType={filters.type}
+            onTypeChange={handleTypeChange}
+            selectedCategory={filters.category}
+            onCategoryChange={handleCategoryChange}
+            onResetFilters={handleResetFilters}
           />
 
-          {filteredTransactions.length === 0 ? (
+          {initialTransactions.length === 0 ? (
             <TransactionEmptyState
               isFiltered={isFiltered}
-              onResetFilters={resetFilters}
+              onResetFilters={handleResetFilters}
               onAddTransaction={() => setCreateOpen(true)}
             />
           ) : (
@@ -299,7 +310,7 @@ export function TransactionTable({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredTransactions.map((tx) => (
+                    {initialTransactions.map((tx) => (
                       <TableRow key={tx.id} className="group">
                         {/* Date */}
                         <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
@@ -424,7 +435,7 @@ export function TransactionTable({
 
               {/* Mobile Card / List View (< md) */}
               <div className="grid grid-cols-1 gap-3 md:hidden">
-                {filteredTransactions.map((tx) => (
+                {initialTransactions.map((tx) => (
                   <Card
                     key={tx.id}
                     className="border-border/80 bg-card shadow-2xs overflow-hidden"
@@ -529,6 +540,17 @@ export function TransactionTable({
                   </Card>
                 ))}
               </div>
+
+              {/* Server-Side Pagination Controls */}
+              <TransactionPagination
+                currentPage={currentPage}
+                pageSize={pageSize}
+                totalCount={totalCount}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+                isPending={isPending}
+              />
             </>
           )}
         </div>
