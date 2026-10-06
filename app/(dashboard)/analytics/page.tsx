@@ -1,5 +1,6 @@
 import React from "react";
 import { redirect } from "next/navigation";
+import dynamicImport from "next/dynamic";
 import { LineChart } from "lucide-react";
 
 import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
@@ -8,11 +9,33 @@ import { getAnalyticsData } from "@/lib/analytics/queries";
 import { AnalyticsPeriodSelector } from "@/components/analytics/analytics-period-selector";
 import { AnalyticsSummaryCards } from "@/components/analytics/analytics-summary-cards";
 import { FinancialInsightsCard } from "@/components/insights/financial-insights-card";
-import { MonthlyTrendChart } from "@/components/analytics/monthly-trend-chart";
-import { CategoryExpenseChart } from "@/components/analytics/category-expense-chart";
 import { BudgetVsActualCard } from "@/components/analytics/budget-vs-actual-card";
 import { CurrencyExclusionBanner } from "@/components/analytics/currency-exclusion-banner";
 import { AnalyticsEmptyState } from "@/components/analytics/analytics-empty-state";
+import {
+  MonthlyTrendChartSkeleton,
+  CategoryExpenseChartSkeleton,
+} from "@/components/analytics/analytics-chart-skeletons";
+
+const MonthlyTrendChart = dynamicImport(
+  () =>
+    import("@/components/analytics/monthly-trend-chart").then(
+      (mod) => mod.MonthlyTrendChart
+    ),
+  {
+    loading: () => <MonthlyTrendChartSkeleton />,
+  }
+);
+
+const CategoryExpenseChart = dynamicImport(
+  () =>
+    import("@/components/analytics/category-expense-chart").then(
+      (mod) => mod.CategoryExpenseChart
+    ),
+  {
+    loading: () => <CategoryExpenseChartSkeleton />,
+  }
+);
 
 export const dynamic = "force-dynamic";
 

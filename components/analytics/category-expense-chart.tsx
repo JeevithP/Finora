@@ -12,8 +12,47 @@ import { CategoryExpenseItem } from "@/lib/analytics/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
-import * as Icons from "lucide-react";
-import { LucideIcon } from "lucide-react";
+import {
+  Tag,
+  Home,
+  ShoppingCart,
+  Utensils,
+  Car,
+  Zap,
+  Film,
+  HeartPulse,
+  ShoppingBag,
+  GraduationCap,
+  Sparkles,
+  CircleEllipsis,
+  Briefcase,
+  Laptop,
+  TrendingUp,
+  Building,
+  Gift,
+  Coins,
+} from "lucide-react";
+
+export const CATEGORY_ICON_MAP: Record<string, React.ElementType> = {
+  Tag,
+  Home,
+  ShoppingCart,
+  Utensils,
+  Car,
+  Zap,
+  Film,
+  HeartPulse,
+  ShoppingBag,
+  GraduationCap,
+  Sparkles,
+  CircleEllipsis,
+  Briefcase,
+  Laptop,
+  TrendingUp,
+  Building,
+  Gift,
+  Coins,
+};
 
 interface CategoryExpenseChartProps {
   categories: CategoryExpenseItem[];
@@ -27,9 +66,7 @@ function DynamicCategoryIcon({
   name: string;
   className?: string;
 }) {
-  const IconComponent = ((Icons as unknown as Record<string, LucideIcon>)[
-    name
-  ] || Icons.Tag) as LucideIcon;
+  const IconComponent = CATEGORY_ICON_MAP[name] || Tag;
   return <IconComponent className={className} />;
 }
 

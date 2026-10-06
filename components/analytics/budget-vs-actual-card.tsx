@@ -1,5 +1,3 @@
-"use client";
-
 import React from "react";
 import Link from "next/link";
 import {
@@ -8,6 +6,7 @@ import {
   AlertCircle,
   ExternalLink,
   HelpCircle,
+  Tag,
 } from "lucide-react";
 import { BudgetVsActualItem, CategoryExpenseItem } from "@/lib/analytics/types";
 import {
@@ -21,8 +20,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatPercentage } from "@/lib/formatters";
-import * as Icons from "lucide-react";
-import { LucideIcon } from "lucide-react";
+import { CATEGORY_ICON_MAP } from "./category-expense-chart";
 
 interface BudgetVsActualCardProps {
   budgets: BudgetVsActualItem[];
@@ -38,9 +36,7 @@ function DynamicCategoryIcon({
   name: string;
   className?: string;
 }) {
-  const IconComponent = ((Icons as unknown as Record<string, LucideIcon>)[
-    name
-  ] || Icons.Tag) as LucideIcon;
+  const IconComponent = CATEGORY_ICON_MAP[name] || Tag;
   return <IconComponent className={className} />;
 }
 
