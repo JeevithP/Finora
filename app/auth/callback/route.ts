@@ -1,9 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
+import { getTrustedAppOrigin } from "@/lib/auth/cached";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
+  const appOrigin = getTrustedAppOrigin(origin);
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
@@ -22,7 +24,7 @@ export async function GET(request: Request) {
   if (error) {
     const errorTarget = type === "recovery" ? "/auth/forgot-password" : "/login";
     return NextResponse.redirect(
-      `${origin}${errorTarget}?error=${encodeURIComponent(errorDescription || error)}`
+      `${appOrigin}${errorTarget}?error=${encodeURIComponent(errorDescription || error)}`
     );
   }
 
@@ -32,7 +34,7 @@ export async function GET(request: Request) {
   if (code) {
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
     if (!exchangeError) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${appOrigin}${next}`);
     }
   }
 
@@ -43,12 +45,12 @@ export async function GET(request: Request) {
       type,
     });
     if (!verifyError) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${appOrigin}${next}`);
     }
   }
 
   // Fallback on failure: return to appropriate auth page with error notification
   const fallbackTarget = type === "recovery" ? "/auth/forgot-password" : "/login";
-  return NextResponse.redirect(`${origin}${fallbackTarget}?error=auth-callback-failed`);
+  return NextResponse.redirect(`${appOrigin}${fallbackTarget}?error=auth-callback-failed`);
 }
 

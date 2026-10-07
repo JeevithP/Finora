@@ -54,3 +54,35 @@ export const getUserProfile = cache(
     return data as Profile;
   }
 );
+
+/**
+ * Resolves the trusted application origin for auth callbacks and password resets.
+ * In production: Uses configured NEXT_PUBLIC_APP_URL or NEXT_PUBLIC_SITE_URL.
+ * In development: Falls back to http://localhost:3000.
+ * Prevents host header injection attacks by never trusting arbitrary incoming host headers.
+ */
+export function getTrustedAppOrigin(fallbackUrl?: string): string {
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL;
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, "");
+  }
+
+  if (fallbackUrl) {
+    try {
+      const parsed = new URL(fallbackUrl);
+      if (
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "[::1]"
+      ) {
+        return parsed.origin;
+      }
+    } catch {
+      // ignore parsing failure
+    }
+  }
+
+  return "http://localhost:3000";
+}

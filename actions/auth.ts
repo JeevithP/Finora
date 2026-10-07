@@ -1,8 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { getTrustedAppOrigin } from "@/lib/auth/cached";
 import {
   loginSchema,
   signupSchema,
@@ -153,11 +153,8 @@ export async function requestPasswordResetAction(
   const { email } = result.data;
   const supabase = await createClient();
 
-  // Resolve application origin dynamically from incoming request headers
-  const headerList = await headers();
-  const host = headerList.get("x-forwarded-host") || headerList.get("host");
-  const proto = headerList.get("x-forwarded-proto") || (process.env.NODE_ENV === "development" ? "http" : "https");
-  const origin = host ? `${proto}://${host}` : (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+  // Resolve application origin securely against trusted configuration
+  const origin = getTrustedAppOrigin();
 
   const redirectTo = `${origin}/auth/callback?next=/auth/reset-password`;
 

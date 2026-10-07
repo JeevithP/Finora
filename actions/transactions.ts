@@ -541,9 +541,20 @@ export interface ExportTransactionsResult {
   error?: string;
 }
 
-function escapeCsvField(val: unknown): string {
+const CSV_FORMULA_TRIGGERS = ["=", "+", "-", "@", "\t", "\r"];
+
+function escapeCsvField(val: unknown, isTextField = false): string {
   if (val === null || val === undefined) return "";
-  const str = String(val);
+  let str = String(val);
+
+  // Neutralize spreadsheet formula injection on user-controlled text fields (CWE-1236)
+  if (isTextField && str.length > 0) {
+    const firstChar = str.charAt(0);
+    if (CSV_FORMULA_TRIGGERS.includes(firstChar)) {
+      str = `'${str}`;
+    }
+  }
+
   if (
     str.includes(",") ||
     str.includes('"') ||
@@ -698,17 +709,17 @@ export async function exportFilteredTransactionsAction(
     const createdAt = tx.created_at;
 
     const line = [
-      escapeCsvField(date),
-      escapeCsvField(id),
-      escapeCsvField(type),
-      escapeCsvField(description),
-      escapeCsvField(amount),
-      escapeCsvField(currency),
-      escapeCsvField(accountName),
-      escapeCsvField(destAccountName),
-      escapeCsvField(categoryName),
-      escapeCsvField(notes),
-      escapeCsvField(createdAt),
+      escapeCsvField(date, false),
+      escapeCsvField(id, false),
+      escapeCsvField(type, false),
+      escapeCsvField(description, true),
+      escapeCsvField(amount, false),
+      escapeCsvField(currency, false),
+      escapeCsvField(accountName, true),
+      escapeCsvField(destAccountName, true),
+      escapeCsvField(categoryName, true),
+      escapeCsvField(notes, true),
+      escapeCsvField(createdAt, false),
     ].join(",");
 
     csvLines.push(line);
