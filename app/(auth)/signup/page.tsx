@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Eye, EyeOff, AlertCircle, MailCheck, ArrowRight } from "lucide-react";
@@ -10,6 +10,8 @@ import { toast } from "sonner";
 
 import { signupSchema, type SignupInput } from "@/lib/validations/auth";
 import { signupAction } from "@/actions/auth";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { getSafeErrorMessage } from "@/lib/auth/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,14 +24,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
+  const mappedUrlError = getSafeErrorMessage(urlError);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(mappedUrlError);
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [userEmail, setUserEmail] = useState("");
+
 
   const {
     register,
@@ -133,9 +139,25 @@ export default function SignupPage() {
             </div>
           )}
 
+          {/* Primary Preferred Auth Method: Google Sign-In */}
+          <GoogleSignInButton next="/dashboard" text="Sign up with Google" />
+
+          {/* Divider */}
+          <div className="relative my-2">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                Or continue with email
+              </span>
+            </div>
+          </div>
+
           {/* Full Name field */}
           <div className="space-y-1.5">
             <Label htmlFor="fullName">Full name</Label>
+
             <Input
               id="fullName"
               type="text"
@@ -270,5 +292,26 @@ export default function SignupPage() {
         </CardFooter>
       </form>
     </Card>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <Card className="shadow-md border-border/80 animate-pulse p-8">
+          <div className="h-8 bg-muted rounded-md w-1/3 mb-4" />
+          <div className="h-4 bg-muted rounded-md w-2/3 mb-8" />
+          <div className="space-y-4">
+            <div className="h-10 bg-muted rounded-md" />
+            <div className="h-10 bg-muted rounded-md" />
+            <div className="h-10 bg-muted rounded-md" />
+            <div className="h-10 bg-muted rounded-md" />
+          </div>
+        </Card>
+      }
+    >
+      <SignupForm />
+    </Suspense>
   );
 }

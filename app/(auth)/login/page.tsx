@@ -10,6 +10,8 @@ import { toast } from "sonner";
 
 import { loginSchema, type LoginInput } from "@/lib/validations/auth";
 import { loginAction } from "@/actions/auth";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { getSafeErrorMessage } from "@/lib/auth/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,9 +28,11 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/dashboard";
+  const urlError = searchParams.get("error");
+  const mappedUrlError = getSafeErrorMessage(urlError);
 
   const [showPassword, setShowPassword] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(mappedUrlError);
 
   const {
     register,
@@ -76,7 +80,7 @@ function LoginForm() {
           Sign In
         </CardTitle>
         <CardDescription>
-          Enter your email and password to access your Finora account
+          Choose your preferred method to access your Finora account
         </CardDescription>
       </CardHeader>
 
@@ -88,6 +92,22 @@ function LoginForm() {
               <div className="leading-snug">{serverError}</div>
             </div>
           )}
+
+          {/* Primary Preferred Auth Method: Google Sign-In */}
+          <GoogleSignInButton next={next} />
+
+          {/* Divider */}
+          <div className="relative my-2">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                Or continue with email
+              </span>
+            </div>
+          </div>
+
 
           {/* Email field */}
           <div className="space-y-1.5">
