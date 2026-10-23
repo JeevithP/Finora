@@ -57,6 +57,9 @@ ALTER TABLE public.transactions
   );
 
 -- 5. UPDATE BALANCE ADJUSTMENT HELPER FUNCTION
+-- Drop legacy 5-argument overload to ensure unambiguous function resolution
+DROP FUNCTION IF EXISTS public.fn_adjust_account_balance(UUID, VARCHAR, NUMERIC, BOOLEAN, INTEGER);
+
 CREATE OR REPLACE FUNCTION public.fn_adjust_account_balance(
   p_account_id UUID,
   p_tx_type VARCHAR,

@@ -270,6 +270,7 @@ export interface Database {
           p_amount: number;
           p_is_destination: boolean;
           p_multiplier: number;
+          p_adjustment_type?: string | null;
         };
         Returns: void;
       };
