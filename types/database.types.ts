@@ -14,7 +14,15 @@ export type AccountType =
   | "credit_card"
   | "loan";
 
-export type TransactionType = "income" | "expense" | "transfer" | "refund";
+export type TransactionType =
+  | "income"
+  | "expense"
+  | "transfer"
+  | "refund"
+  | "adjustment"
+  | "loan_repayment";
+
+export type AdjustmentType = "increase" | "decrease";
 
 export type CategoryType = "expense" | "income";
 
@@ -132,6 +140,7 @@ export interface Database {
           category_id: string | null;
           original_transaction_id: string | null;
           type: TransactionType;
+          adjustment_type: AdjustmentType | null;
           amount: number;
           date: string;
           description: string;
@@ -147,6 +156,7 @@ export interface Database {
           category_id?: string | null;
           original_transaction_id?: string | null;
           type: TransactionType;
+          adjustment_type?: AdjustmentType | null;
           amount: number;
           date?: string;
           description: string;
@@ -162,6 +172,7 @@ export interface Database {
           category_id?: string | null;
           original_transaction_id?: string | null;
           type?: TransactionType;
+          adjustment_type?: AdjustmentType | null;
           amount?: number;
           date?: string;
           description?: string;
@@ -221,6 +232,26 @@ export interface Database {
       };
     };
     Functions: {
+      fn_record_loan_repayment: {
+        Args: {
+          p_paying_account_id: string;
+          p_loan_account_id: string;
+          p_principal_amount: number;
+          p_date: string;
+          p_description: string;
+          p_notes?: string | null;
+          p_interest_amount?: number | null;
+          p_interest_category_id?: string | null;
+        };
+        Returns: Json;
+      };
+      fn_correct_opening_balance: {
+        Args: {
+          p_account_id: string;
+          p_new_initial_balance: number;
+        };
+        Returns: Json;
+      };
       fn_get_analytics_data: {
         Args: {
           p_start_date: string;

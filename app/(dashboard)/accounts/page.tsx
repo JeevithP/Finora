@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Landmark } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
-import { Account } from "@/types/database.types";
+import { Account, Category } from "@/types/database.types";
 import { AccountSummaryCards } from "@/components/accounts/account-summary-cards";
 import { AccountGrid } from "@/components/accounts/account-grid";
 
@@ -15,8 +15,8 @@ export default async function AccountsPage() {
 
   const supabase = await createClient();
 
-  // Parallelize user profile and accounts with embedded transaction existence check
-  const [profile, accountsResult] = await Promise.all([
+  // Parallelize user profile, accounts, and categories
+  const [profile, accountsResult, categoriesResult] = await Promise.all([
     getUserProfile(user.id),
     supabase
       .from("accounts")
@@ -27,6 +27,11 @@ export default async function AccountsPage() {
       .order("created_at", { ascending: false })
       .limit(1, { foreignTable: "tx_src" })
       .limit(1, { foreignTable: "tx_dst" }),
+    supabase
+      .from("categories")
+      .select("*")
+      .or(`user_id.eq.${user.id},is_system.eq.true`)
+      .order("name", { ascending: true }),
   ]);
 
   const defaultCurrency = profile?.default_currency || "INR";
@@ -53,6 +58,8 @@ export default async function AccountsPage() {
     }
     return account as Account;
   });
+
+  const categories = (categoriesResult.data || []) as Category[];
 
   return (
     <div className="space-y-6">
@@ -84,6 +91,7 @@ export default async function AccountsPage() {
         accounts={accounts}
         defaultCurrency={defaultCurrency}
         transactionCounts={transactionCounts}
+        categories={categories}
       />
     </div>
   );

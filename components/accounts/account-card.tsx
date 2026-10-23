@@ -13,9 +13,10 @@ import {
   Archive,
   RotateCcw,
   Trash2,
+  SlidersHorizontal,
 } from "lucide-react";
 
-import { Account } from "@/types/database.types";
+import { Account, Category } from "@/types/database.types";
 import { formatCurrency } from "@/lib/formatters";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +31,14 @@ import {
 import { EditAccountDialog } from "./edit-account-dialog";
 import { ArchiveAccountDialog } from "./archive-account-dialog";
 import { DeleteAccountDialog } from "./delete-account-dialog";
+import { AdjustBalanceDialog } from "./adjust-balance-dialog";
+import { LoanRepaymentDialog } from "@/components/transactions/loan-repayment-dialog";
 
 interface AccountCardProps {
   account: Account;
   transactionCount?: number;
+  allAccounts?: Account[];
+  categories?: Category[];
 }
 
 const TYPE_CONFIG: Record<
@@ -48,11 +53,19 @@ const TYPE_CONFIG: Record<
   loan: { label: "Loan", icon: Receipt, isLiability: true },
 };
 
-export function AccountCard({ account, transactionCount = 0 }: AccountCardProps) {
+export function AccountCard({
+  account,
+  transactionCount = 0,
+  allAccounts = [],
+  categories = [],
+}: AccountCardProps) {
   const [editOpen, setEditOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [repayOpen, setRepayOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const hasTransactions = transactionCount > 0;
+  const isLoanOrCredit = account.type === "loan" || account.type === "credit_card";
 
   const config = TYPE_CONFIG[account.type] || {
     label: account.type,
@@ -132,6 +145,24 @@ export function AccountCard({ account, transactionCount = 0 }: AccountCardProps)
                 </DropdownMenuItem>
 
                 <DropdownMenuItem
+                  onClick={() => setAdjustOpen(true)}
+                  className="gap-2 text-xs"
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  <span>Adjust Balance</span>
+                </DropdownMenuItem>
+
+                {isLoanOrCredit && (
+                  <DropdownMenuItem
+                    onClick={() => setRepayOpen(true)}
+                    className="gap-2 text-xs text-primary focus:text-primary font-medium"
+                  >
+                    <Receipt className="h-3.5 w-3.5" />
+                    <span>Make Repayment</span>
+                  </DropdownMenuItem>
+                )}
+
+                <DropdownMenuItem
                   onClick={() => setArchiveOpen(true)}
                   className="gap-2 text-xs"
                 >
@@ -189,6 +220,22 @@ export function AccountCard({ account, transactionCount = 0 }: AccountCardProps)
         onOpenChange={setEditOpen}
         hasTransactions={hasTransactions}
       />
+
+      <AdjustBalanceDialog
+        account={account}
+        open={adjustOpen}
+        onOpenChange={setAdjustOpen}
+      />
+
+      {isLoanOrCredit && (
+        <LoanRepaymentDialog
+          accounts={allAccounts.length > 0 ? allAccounts : [account]}
+          categories={categories}
+          open={repayOpen}
+          onOpenChange={setRepayOpen}
+          preselectedLoanId={account.id}
+        />
+      )}
 
       <ArchiveAccountDialog
         account={account}

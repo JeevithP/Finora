@@ -5,8 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 import {
   createAccountSchema,
   updateAccountSchema,
+  adjustBalanceSchema,
   type CreateAccountInput,
   type UpdateAccountInput,
+  type AdjustBalanceInput,
 } from "@/lib/validations/account";
 import { Account } from "@/types/database.types";
 
@@ -286,3 +288,183 @@ export async function deleteAccountAction(
     success: true,
   };
 }
+
+export async function adjustAccountBalanceAction(
+  input: AdjustBalanceInput
+): Promise<AccountActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Unauthorized. Please log in.",
+    };
+  }
+
+  const result = adjustBalanceSchema.safeParse(input);
+  if (!result.success) {
+    return {
+      success: false,
+      error:
+        result.error.issues[0]?.message || "Invalid balance adjustment details",
+    };
+  }
+
+  const data = result.data;
+
+  // 1. Fetch target account
+  const { data: account, error: accError } = await supabase
+    .from("accounts")
+    .select("*")
+    .eq("id", data.accountId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (accError || !account) {
+    return {
+      success: false,
+      error: "Account not found or access denied.",
+    };
+  }
+
+  if (data.mode === "opening_balance") {
+    // Mode 1: Opening balance correction
+    const oldInitial = Number(account.initial_balance);
+    const newInitial = Number(data.newInitialBalance);
+    const diff = newInitial - oldInitial;
+
+    if (diff === 0) {
+      return {
+        success: true,
+        data: account,
+      };
+    }
+
+    // Call atomic RPC function fn_correct_opening_balance (with row locking to eliminate read-modify-write race)
+    const rpcRes = await supabase.rpc("fn_correct_opening_balance", {
+      p_account_id: account.id,
+      p_new_initial_balance: newInitial,
+    });
+
+    if (!rpcRes.error && rpcRes.data) {
+      revalidatePath("/accounts");
+      revalidatePath("/dashboard");
+      revalidatePath("/transactions");
+
+      return {
+        success: true,
+        data: rpcRes.data as unknown as Account,
+      };
+    }
+
+    // If RPC returned an actual business/permission error (not PGRST202), fail immediately
+    if (rpcRes.error && rpcRes.error.code !== "PGRST202") {
+      return {
+        success: false,
+        error: rpcRes.error.message,
+      };
+    }
+
+    // Fallback strictly when RPC is not installed (e.g. before migration runs)
+    const currentBal = Number(account.current_balance);
+    const newCurrent = currentBal + diff;
+
+    const { data: updatedAcc, error: updateError } = await supabase
+      .from("accounts")
+      .update({
+        initial_balance: newInitial,
+        current_balance: newCurrent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", account.id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return {
+        success: false,
+        error: updateError.message,
+      };
+    }
+
+    revalidatePath("/accounts");
+    revalidatePath("/dashboard");
+    revalidatePath("/transactions");
+
+    return {
+      success: true,
+      data: updatedAcc as Account,
+    };
+  } else {
+    // Mode 2: Reconcile current balance via ledger adjustment transaction
+    const currentBal = Number(account.current_balance);
+    const targetBal = Number(data.targetCurrentBalance);
+    const diff = targetBal - currentBal;
+
+    if (diff === 0) {
+      return {
+        success: false,
+        error: "Target balance matches current balance. No adjustment needed.",
+      };
+    }
+
+    const isIncrease = diff > 0;
+    const adjustmentType: "increase" | "decrease" = isIncrease
+      ? "increase"
+      : "decrease";
+    const amount = Math.abs(diff);
+
+    const defaultDesc =
+      account.type === "credit_card" || account.type === "loan"
+        ? isIncrease
+          ? "Balance Adjustment (Debt Increase)"
+          : "Balance Adjustment (Debt Decrease)"
+        : isIncrease
+          ? "Balance Adjustment (Increase)"
+          : "Balance Adjustment (Decrease)";
+
+    const description = data.description?.trim() || defaultDesc;
+
+    // Insert auditable transaction (PostgreSQL trigger trg_sync_account_balance atomically updates account.current_balance)
+    const { error: txError } = await supabase.from("transactions").insert({
+      user_id: user.id,
+      account_id: account.id,
+      destination_account_id: null,
+      category_id: null,
+      type: "adjustment",
+      adjustment_type: adjustmentType,
+      amount,
+      date: data.date.split("T")[0],
+      description,
+      notes: data.notes || null,
+    });
+
+    if (txError) {
+      return {
+        success: false,
+        error: txError.message,
+      };
+    }
+
+    // Fetch refreshed account
+    const { data: refreshedAcc } = await supabase
+      .from("accounts")
+      .select("*")
+      .eq("id", account.id)
+      .single();
+
+    revalidatePath("/accounts");
+    revalidatePath("/dashboard");
+    revalidatePath("/transactions");
+
+    return {
+      success: true,
+      data: (refreshedAcc || account) as Account,
+    };
+  }
+}
+

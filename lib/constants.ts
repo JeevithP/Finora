@@ -14,6 +14,8 @@ export const TRANSACTION_TYPES = [
   { value: "income", label: "Income", color: "text-emerald-500" },
   { value: "transfer", label: "Transfer", color: "text-sky-500" },
   { value: "refund", label: "Refund", color: "text-amber-500" },
+  { value: "loan_repayment", label: "Loan Repayment", color: "text-indigo-500" },
+  { value: "adjustment", label: "Adjustment", color: "text-purple-500" },
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number]["value"];

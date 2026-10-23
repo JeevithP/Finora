@@ -5,9 +5,14 @@ export const transactionTypeSchema = z.enum([
   "expense",
   "transfer",
   "refund",
+  "adjustment",
+  "loan_repayment",
 ]);
 
 export type TransactionType = z.infer<typeof transactionTypeSchema>;
+
+export const adjustmentTypeSchema = z.enum(["increase", "decrease"]);
+export type AdjustmentType = z.infer<typeof adjustmentTypeSchema>;
 
 /**
  * Base Zod validation rules for transactions
@@ -51,6 +56,7 @@ export const baseTransactionSchema = z.object({
     .uuid({ message: "Invalid original transaction identifier" })
     .nullable()
     .optional(),
+  adjustmentType: adjustmentTypeSchema.nullable().optional(),
 });
 
 /**
@@ -66,61 +72,108 @@ export function normalizeTransactionInput(val: unknown) {
     categoryId: obj.categoryId ?? obj.category_id,
     originalTransactionId:
       obj.originalTransactionId ?? obj.original_transaction_id,
+    adjustmentType: obj.adjustmentType ?? obj.adjustment_type,
   };
+}
+
+function refineTransaction(
+  data: z.infer<typeof baseTransactionSchema>,
+  ctx: z.RefinementCtx
+) {
+  if (data.type === "income" || data.type === "expense") {
+    if (!data.categoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Category is required for ${data.type} transactions`,
+        path: ["categoryId"],
+      });
+    }
+    if (data.destinationAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Destination account must be null for ${data.type} transactions`,
+        path: ["destinationAccountId"],
+      });
+    }
+    if (data.adjustmentType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Adjustment type must be null for ${data.type} transactions`,
+        path: ["adjustmentType"],
+      });
+    }
+  } else if (data.type === "transfer" || data.type === "loan_repayment") {
+    if (!data.destinationAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Destination account is required for ${data.type === "loan_repayment" ? "loan repayments" : "transfers"}`,
+        path: ["destinationAccountId"],
+      });
+    } else if (data.destinationAccountId === data.accountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Source and destination accounts must be different",
+        path: ["destinationAccountId"],
+      });
+    }
+    if (data.categoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Category must be null for ${data.type === "loan_repayment" ? "loan repayments" : "transfers"}`,
+        path: ["categoryId"],
+      });
+    }
+    if (data.adjustmentType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Adjustment type must be null for ${data.type === "loan_repayment" ? "loan repayments" : "transfers"}`,
+        path: ["adjustmentType"],
+      });
+    }
+  } else if (data.type === "refund") {
+    if (data.destinationAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Destination account must be null for refund transactions",
+        path: ["destinationAccountId"],
+      });
+    }
+    if (data.adjustmentType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Adjustment type must be null for refund transactions",
+        path: ["adjustmentType"],
+      });
+    }
+  } else if (data.type === "adjustment") {
+    if (!data.adjustmentType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Adjustment type (increase or decrease) is required for balance adjustments",
+        path: ["adjustmentType"],
+      });
+    }
+    if (data.destinationAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Destination account must be null for balance adjustments",
+        path: ["destinationAccountId"],
+      });
+    }
+    if (data.categoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Category must be null for balance adjustments",
+        path: ["categoryId"],
+      });
+    }
+  }
 }
 
 /**
  * Zod schema for creating a transaction
  */
-export const createTransactionSchema = baseTransactionSchema.superRefine(
-  (data, ctx) => {
-    if (data.type === "income" || data.type === "expense") {
-      if (!data.categoryId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Category is required for ${data.type} transactions`,
-          path: ["categoryId"],
-        });
-      }
-      if (data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Destination account must be null for ${data.type} transactions`,
-          path: ["destinationAccountId"],
-        });
-      }
-    } else if (data.type === "transfer") {
-      if (!data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Destination account is required for transfers",
-          path: ["destinationAccountId"],
-        });
-      } else if (data.destinationAccountId === data.accountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Source and destination accounts must be different",
-          path: ["destinationAccountId"],
-        });
-      }
-      if (data.categoryId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Category must be null for transfers",
-          path: ["categoryId"],
-        });
-      }
-    } else if (data.type === "refund") {
-      if (data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Destination account must be null for refund transactions",
-          path: ["destinationAccountId"],
-        });
-      }
-    }
-  }
-);
+export const createTransactionSchema = baseTransactionSchema.superRefine(refineTransaction);
 
 export type CreateTransactionInput = z.infer<typeof baseTransactionSchema>;
 
@@ -131,57 +184,71 @@ export const updateTransactionSchema = baseTransactionSchema
   .extend({
     id: z.string().uuid({ message: "Invalid transaction identifier" }),
   })
-  .superRefine((data, ctx) => {
-    if (data.type === "income" || data.type === "expense") {
-      if (!data.categoryId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Category is required for ${data.type} transactions`,
-          path: ["categoryId"],
-        });
-      }
-      if (data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Destination account must be null for ${data.type} transactions`,
-          path: ["destinationAccountId"],
-        });
-      }
-    } else if (data.type === "transfer") {
-      if (!data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Destination account is required for transfers",
-          path: ["destinationAccountId"],
-        });
-      } else if (data.destinationAccountId === data.accountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Source and destination accounts must be different",
-          path: ["destinationAccountId"],
-        });
-      }
-      if (data.categoryId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Category must be null for transfers",
-          path: ["categoryId"],
-        });
-      }
-    } else if (data.type === "refund") {
-      if (data.destinationAccountId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Destination account must be null for refund transactions",
-          path: ["destinationAccountId"],
-        });
-      }
-    }
-  });
+  .superRefine(refineTransaction);
 
 export type UpdateTransactionInput = z.infer<typeof baseTransactionSchema> & {
   id: string;
 };
+
+/**
+ * Zod schema for loan repayment workflow
+ */
+export const loanRepaymentSchema = z
+  .object({
+    payingAccountId: z.string().uuid({ message: "Paying account is required" }),
+    loanAccountId: z.string().uuid({ message: "Loan account is required" }),
+    principalAmount: z
+      .number({ message: "Principal amount must be a number" })
+      .positive({ message: "Principal amount must be greater than 0" })
+      .max(999999999999.99, { message: "Amount exceeds maximum limit" }),
+    interestAmount: z
+      .number({ message: "Interest amount must be a number" })
+      .min(0, { message: "Interest amount cannot be negative" })
+      .max(999999999999.99, { message: "Amount exceeds maximum limit" })
+      .optional()
+      .default(0),
+    interestCategoryId: z
+      .string()
+      .uuid({ message: "Category is required for interest expense" })
+      .nullable()
+      .optional(),
+    date: z
+      .string()
+      .trim()
+      .min(1, { message: "Date is required" })
+      .regex(/^\d{4}-\d{2}-\d{2}(T.*)?$/, {
+        message: "Invalid date format (YYYY-MM-DD expected)",
+      }),
+    description: z
+      .string()
+      .trim()
+      .max(255, { message: "Description cannot exceed 255 characters" })
+      .optional()
+      .default(""),
+    notes: z
+      .string()
+      .max(1000, { message: "Notes cannot exceed 1000 characters" })
+      .nullable()
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.payingAccountId === data.loanAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Paying account and loan account must be different",
+        path: ["loanAccountId"],
+      });
+    }
+    if (data.interestAmount && data.interestAmount > 0 && !data.interestCategoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Please select an expense category for the interest/fee portion",
+        path: ["interestCategoryId"],
+      });
+    }
+  });
+
+export type LoanRepaymentInput = z.input<typeof loanRepaymentSchema>;
 
 /**
  * Zod schema for query/filter options
@@ -226,7 +293,7 @@ export const transactionSearchParamsSchema = z.object({
     .optional()
     .default("all"),
   type: z
-    .enum(["all", "income", "expense", "transfer", "refund"])
+    .enum(["all", "income", "expense", "transfer", "refund", "adjustment", "loan_repayment"])
     .optional()
     .default("all"),
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -274,12 +341,14 @@ export function parseTransactionSearchParams(
       ? rawCat
       : "all";
 
+  const validTypes = ["income", "expense", "transfer", "refund", "adjustment", "loan_repayment"];
+
   return {
     q: typeof candidate.q === "string" ? candidate.q.slice(0, 100).trim() : "",
     account: safeAccount,
     category: safeCategory,
-    type: ["income", "expense", "transfer", "refund"].includes(candidate.type as string)
-      ? (candidate.type as "income" | "expense" | "transfer" | "refund")
+    type: validTypes.includes(candidate.type as string)
+      ? (candidate.type as TransactionType)
       : "all",
     page: Math.max(1, parseInt(String(candidate.page), 10) || 1),
     pageSize: [10, 25, 50, 100].includes(parseInt(String(candidate.pageSize), 10))

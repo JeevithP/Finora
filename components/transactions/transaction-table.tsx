@@ -11,6 +11,8 @@ import {
   ArrowDownLeft,
   ArrowLeftRight,
   RotateCcw,
+  Receipt,
+  SlidersHorizontal,
 } from "lucide-react";
 
 import { TransactionWithRelations } from "@/actions/transactions";
@@ -43,6 +45,14 @@ const CreateTransactionDialog = dynamic(
   () =>
     import("./create-transaction-dialog").then(
       (mod) => mod.CreateTransactionDialog
+    ),
+  { ssr: false }
+);
+
+const LoanRepaymentDialog = dynamic(
+  () =>
+    import("./loan-repayment-dialog").then(
+      (mod) => mod.LoanRepaymentDialog
     ),
   { ssr: false }
 );
@@ -98,6 +108,7 @@ export function TransactionTable({
   const [isPending, startTransition] = useTransition();
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [loanRepayOpen, setLoanRepayOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] =
     useState<TransactionWithRelations | null>(null);
   const [deletingTransaction, setDeletingTransaction] =
@@ -202,6 +213,26 @@ export function TransactionTable({
             <span>Refund</span>
           </Badge>
         );
+      case "loan_repayment":
+        return (
+          <Badge
+            variant="secondary"
+            className="gap-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20 text-[11px] font-medium"
+          >
+            <Receipt className="h-3 w-3" />
+            <span>Loan Repayment</span>
+          </Badge>
+        );
+      case "adjustment":
+        return (
+          <Badge
+            variant="secondary"
+            className="gap-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20 text-[11px] font-medium"
+          >
+            <SlidersHorizontal className="h-3 w-3" />
+            <span>Adjustment</span>
+          </Badge>
+        );
       default:
         return <Badge variant="outline">{type}</Badge>;
     }
@@ -223,6 +254,27 @@ export function TransactionTable({
       return (
         <span className="font-mono font-semibold text-rose-600 dark:text-rose-400">
           -{formatted}
+        </span>
+      );
+    }
+    if (tx.type === "loan_repayment") {
+      return (
+        <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+          -{formatted}
+        </span>
+      );
+    }
+    if (tx.type === "adjustment") {
+      const isIncrease = tx.adjustment_type === "increase";
+      return (
+        <span
+          className={`font-mono font-semibold ${
+            isIncrease
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-rose-600 dark:text-rose-400"
+          }`}
+        >
+          {isIncrease ? `+${formatted}` : `-${formatted}`}
         </span>
       );
     }
@@ -256,6 +308,14 @@ export function TransactionTable({
               selectedCategory: filters.category,
             }}
           />
+          <Button
+            variant="outline"
+            onClick={() => setLoanRepayOpen(true)}
+            className="gap-2 shadow-xs"
+          >
+            <Receipt className="h-4 w-4 text-primary" />
+            <span>Loan Repayment</span>
+          </Button>
           <Button
             onClick={() => setCreateOpen(true)}
             className="gap-2 shadow-xs"
@@ -563,6 +623,14 @@ export function TransactionTable({
         defaultCurrency={defaultCurrency}
         open={createOpen}
         onOpenChange={setCreateOpen}
+      />
+
+      {/* Loan Repayment Dialog */}
+      <LoanRepaymentDialog
+        accounts={accounts}
+        categories={categories}
+        open={loanRepayOpen}
+        onOpenChange={setLoanRepayOpen}
       />
 
       {/* Edit Transaction Dialog */}

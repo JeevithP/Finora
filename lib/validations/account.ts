@@ -55,3 +55,50 @@ export const updateAccountSchema = z.object({
 });
 
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
+
+export const adjustBalanceSchema = z.discriminatedUnion("mode", [
+  // Mode 1: Opening balance correction
+  z.object({
+    mode: z.literal("opening_balance"),
+    accountId: z.string().uuid({ message: "Invalid account identifier" }),
+    newInitialBalance: z
+      .number({ message: "Initial balance must be a number" })
+      .min(-999999999999.99, { message: "Balance exceeds minimum limit" })
+      .max(999999999999.99, { message: "Balance exceeds maximum limit" }),
+    reason: z
+      .string()
+      .trim()
+      .max(255, { message: "Reason cannot exceed 255 characters" })
+      .optional()
+      .default(""),
+  }),
+  // Mode 2: Reconcile current balance via ledger adjustment
+  z.object({
+    mode: z.literal("current_balance"),
+    accountId: z.string().uuid({ message: "Invalid account identifier" }),
+    targetCurrentBalance: z
+      .number({ message: "Target balance must be a number" })
+      .min(-999999999999.99, { message: "Balance exceeds minimum limit" })
+      .max(999999999999.99, { message: "Balance exceeds maximum limit" }),
+    date: z
+      .string()
+      .trim()
+      .min(1, { message: "Date is required" })
+      .regex(/^\d{4}-\d{2}-\d{2}(T.*)?$/, {
+        message: "Invalid date format (YYYY-MM-DD expected)",
+      }),
+    description: z
+      .string()
+      .trim()
+      .max(255, { message: "Description cannot exceed 255 characters" })
+      .optional()
+      .default(""),
+    notes: z
+      .string()
+      .max(1000, { message: "Notes cannot exceed 1000 characters" })
+      .nullable()
+      .optional(),
+  }),
+]);
+
+export type AdjustBalanceInput = z.input<typeof adjustBalanceSchema>;

@@ -145,6 +145,19 @@ export function EditAccountDialog({
             </div>
           </div>
 
+          {/* Ledger Immutability Guard Notice */}
+          {hasTransactions && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+              <Lock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-medium text-[11px]">Type & Currency Locked</p>
+                <p className="text-[10px] leading-relaxed opacity-90">
+                  Transactions exist in the ledger for this account. Account type and currency cannot be modified to prevent corrupting historical balance synchronization. Safe display fields (name, styling) remain fully editable.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Account Name */}
           <div className="space-y-1.5">
             <Label htmlFor="edit-account-name" className="text-xs font-medium">

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Landmark, ArrowDownRight, Archive, Plus } from "lucide-react";
-import { Account } from "@/types/database.types";
+import { Account, Category } from "@/types/database.types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { AccountCard } from "./account-card";
@@ -14,12 +14,14 @@ interface AccountGridProps {
   accounts: Account[];
   defaultCurrency?: string;
   transactionCounts?: Record<string, number>;
+  categories?: Category[];
 }
 
 export function AccountGrid({
   accounts,
   defaultCurrency = "INR",
   transactionCounts = {},
+  categories = [],
 }: AccountGridProps) {
   const activeAccounts = accounts.filter((a) => !a.is_archived);
   const archivedAccounts = accounts.filter((a) => a.is_archived);
@@ -95,6 +97,8 @@ export function AccountGrid({
                       key={account.id}
                       account={account}
                       transactionCount={transactionCounts[account.id] || 0}
+                      allAccounts={accounts}
+                      categories={categories}
                     />
                   ))}
                 </div>
@@ -120,6 +124,8 @@ export function AccountGrid({
                       key={account.id}
                       account={account}
                       transactionCount={transactionCounts[account.id] || 0}
+                      allAccounts={accounts}
+                      categories={categories}
                     />
                   ))}
                 </div>
@@ -150,6 +156,8 @@ export function AccountGrid({
                 key={account.id}
                 account={account}
                 transactionCount={transactionCounts[account.id] || 0}
+                allAccounts={accounts}
+                categories={categories}
               />
             ))}
           </div>

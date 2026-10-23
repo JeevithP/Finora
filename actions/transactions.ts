@@ -7,11 +7,13 @@ import {
   updateTransactionSchema,
   transactionQuerySchema,
   normalizeTransactionInput,
+  loanRepaymentSchema,
   type CreateTransactionInput,
   type UpdateTransactionInput,
   type TransactionQueryInput,
+  type LoanRepaymentInput,
 } from "@/lib/validations/transaction";
-import { Transaction, Account, Category } from "@/types/database.types";
+import { Transaction, Account, Category, TransactionType } from "@/types/database.types";
 import { TRANSACTION_SELECT_QUERY } from "@/lib/constants";
 
 export type TransactionWithRelations = Transaction & {
@@ -83,6 +85,7 @@ export async function createTransactionAction(
     destinationAccountId,
     categoryId,
     originalTransactionId,
+    adjustmentType,
   } = result.data;
 
   // 1. Verify source account ownership
@@ -160,6 +163,7 @@ export async function createTransactionAction(
       category_id: categoryId ?? null,
       original_transaction_id: originalTransactionId ?? null,
       type,
+      adjustment_type: adjustmentType ?? null,
       amount,
       date,
       description,
@@ -344,6 +348,7 @@ export async function updateTransactionAction(
     destinationAccountId,
     categoryId,
     originalTransactionId,
+    adjustmentType,
   } = result.data;
 
   // 1. Verify transaction exists and belongs to current user
@@ -435,6 +440,7 @@ export async function updateTransactionAction(
       category_id: categoryId ?? null,
       original_transaction_id: originalTransactionId ?? null,
       type,
+      adjustment_type: adjustmentType ?? null,
       amount,
       date,
       description,
@@ -614,12 +620,16 @@ export async function exportFilteredTransactionsAction(
   if (
     selectedType &&
     selectedType !== "all" &&
-    ["income", "expense", "transfer", "refund"].includes(selectedType)
+    [
+      "income",
+      "expense",
+      "transfer",
+      "refund",
+      "loan_repayment",
+      "adjustment",
+    ].includes(selectedType)
   ) {
-    query = query.eq(
-      "type",
-      selectedType as "income" | "expense" | "transfer" | "refund"
-    );
+    query = query.eq("type", selectedType as NonNullable<TransactionType>);
   }
 
   // Apply Category Filter
@@ -737,5 +747,237 @@ export async function exportFilteredTransactionsAction(
     rowCount: rows.length,
     isCapped,
     totalFound,
+  };
+}
+
+/**
+ * CREATE LOAN REPAYMENT
+ * Dedicated action to record loan principal repayments from an asset account
+ * to a loan liability account, with optional atomic interest/fee expense tracking.
+ */
+export async function createLoanRepaymentAction(
+  input: LoanRepaymentInput
+): Promise<TransactionActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      success: false,
+      error: "Unauthorized. Please log in.",
+    };
+  }
+
+  const result = loanRepaymentSchema.safeParse(input);
+  if (!result.success) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of result.error.issues) {
+      const field = issue.path[0] as string;
+      if (!fieldErrors[field]) {
+        fieldErrors[field] = [];
+      }
+      fieldErrors[field].push(issue.message);
+    }
+    return {
+      success: false,
+      error: result.error.issues[0]?.message || "Invalid loan repayment details",
+      fieldErrors,
+    };
+  }
+
+  const {
+    payingAccountId,
+    loanAccountId,
+    principalAmount,
+    interestAmount,
+    interestCategoryId,
+    date,
+    description,
+    notes,
+  } = result.data;
+
+  // 1. Verify paying account (must be asset account owned by user)
+  const { data: payingAcc, error: payingErr } = await supabase
+    .from("accounts")
+    .select("id, name, type, currency, user_id")
+    .eq("id", payingAccountId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (payingErr || !payingAcc) {
+    return {
+      success: false,
+      error: "Paying account not found or access denied.",
+    };
+  }
+
+  const assetTypes = ["checking", "savings", "cash", "investment"];
+  if (!assetTypes.includes(payingAcc.type)) {
+    return {
+      success: false,
+      error: "Paying account must be an asset account (checking, savings, cash, or investment).",
+    };
+  }
+
+  // 2. Verify loan account (must be liability account owned by user)
+  const { data: loanAcc, error: loanErr } = await supabase
+    .from("accounts")
+    .select("id, name, type, currency, user_id")
+    .eq("id", loanAccountId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (loanErr || !loanAcc) {
+    return {
+      success: false,
+      error: "Loan account not found or access denied.",
+    };
+  }
+
+  if (loanAcc.type !== "loan" && loanAcc.type !== "credit_card") {
+    return {
+      success: false,
+      error: "Target account must be a liability account (loan or credit card).",
+    };
+  }
+
+  // 3. If interest specified, verify category is valid expense category
+  if (interestAmount && interestAmount > 0) {
+    if (!interestCategoryId) {
+      return {
+        success: false,
+        error: "Category is required for interest expense.",
+      };
+    }
+    const { data: intCat, error: intCatErr } = await supabase
+      .from("categories")
+      .select("id, type, user_id, is_system")
+      .eq("id", interestCategoryId)
+      .maybeSingle();
+
+    if (intCatErr || !intCat || (!intCat.is_system && intCat.user_id !== user.id)) {
+      return {
+        success: false,
+        error: "Interest expense category not found or access denied.",
+      };
+    }
+
+    if (intCat.type !== "expense") {
+      return {
+        success: false,
+        error: "Interest category must be an expense category.",
+      };
+    }
+  }
+
+  const repaymentDesc =
+    description?.trim() || `Loan Repayment: ${loanAcc.name}`;
+  const txDate = date.split("T")[0];
+
+  // 4. Execute repayment atomically via fn_record_loan_repayment RPC if available, or sequential with rollback
+  let repaymentTxId: string | null = null;
+  const rpcResponse = await supabase.rpc("fn_record_loan_repayment", {
+    p_paying_account_id: payingAccountId,
+    p_loan_account_id: loanAccountId,
+    p_principal_amount: principalAmount,
+    p_date: txDate,
+    p_description: repaymentDesc,
+    p_notes: notes || null,
+    p_interest_amount: interestAmount && interestAmount > 0 ? interestAmount : null,
+    p_interest_category_id: interestCategoryId || null,
+  });
+
+  if (!rpcResponse.error && rpcResponse.data) {
+    const rpcData = rpcResponse.data as { repaymentTransactionId: string };
+    repaymentTxId = rpcData.repaymentTransactionId;
+  } else if (rpcResponse.error?.code === "PGRST202") {
+    // Fallback strictly when RPC function is not installed/found in database
+    const { data: repTx, error: repErr } = await supabase
+      .from("transactions")
+      .insert({
+        user_id: user.id,
+        account_id: payingAccountId,
+        destination_account_id: loanAccountId,
+        category_id: null,
+        type: "loan_repayment",
+        amount: principalAmount,
+        date: txDate,
+        description: repaymentDesc,
+        notes: notes || null,
+      })
+      .select("id")
+      .single();
+
+    if (repErr || !repTx) {
+      return {
+        success: false,
+        error: repErr?.message || "Failed to record loan repayment transaction.",
+      };
+    }
+
+    repaymentTxId = repTx.id;
+
+    if (interestAmount && interestAmount > 0 && interestCategoryId) {
+      const { error: intErr } = await supabase.from("transactions").insert({
+        user_id: user.id,
+        account_id: payingAccountId,
+        destination_account_id: null,
+        category_id: interestCategoryId,
+        type: "expense",
+        amount: interestAmount,
+        date: txDate,
+        description: `Loan Interest: ${loanAcc.name}`,
+        notes: notes ? `Interest portion: ${notes}` : "Interest portion of loan payment",
+      });
+
+      if (intErr) {
+        // Rollback principal transaction to preserve atomicity
+        const { error: rollbackErr } = await supabase
+          .from("transactions")
+          .delete()
+          .eq("id", repaymentTxId);
+
+        if (rollbackErr) {
+          console.error(
+            "CRITICAL: Failed to rollback principal transaction after interest failure:",
+            rollbackErr
+          );
+        }
+
+        return {
+          success: false,
+          error: `Failed to record interest expense: ${intErr.message}.${
+            rollbackErr ? " WARNING: Rollback of principal transaction failed." : ""
+          }`,
+        };
+      }
+    }
+  } else {
+    // Return actual database RPC error directly without attempting separate inserts
+    return {
+      success: false,
+      error:
+        rpcResponse.error?.message ||
+        "Failed to record loan repayment via database RPC.",
+    };
+  }
+
+  // 5. Fetch populated transaction for client state
+  const { data: finalTx } = await supabase
+    .from("transactions")
+    .select(TRANSACTION_SELECT_QUERY)
+    .eq("id", repaymentTxId)
+    .single();
+
+  revalidatePath("/accounts");
+  revalidatePath("/dashboard");
+  revalidatePath("/transactions");
+  revalidatePath("/analytics");
+
+  return {
+    success: true,
+    data: (finalTx as unknown as TransactionWithRelations) || undefined,
   };
 }

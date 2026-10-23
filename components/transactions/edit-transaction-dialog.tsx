@@ -76,6 +76,7 @@ export function EditTransactionDialog({
       destinationAccountId: transaction.destination_account_id || null,
       categoryId: transaction.category_id || null,
       originalTransactionId: transaction.original_transaction_id || null,
+      adjustmentType: (transaction as any).adjustment_type || null,
     },
   });
 
@@ -185,12 +186,12 @@ export function EditTransactionDialog({
           </div>
 
           {/* Account Selection */}
-          {selectedType === "transfer" ? (
+          {selectedType === "transfer" || selectedType === "loan_repayment" ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {/* Source Account (From) */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">
-                  From Account <span className="text-destructive">*</span>
+                  {selectedType === "loan_repayment" ? "Paying Account" : "From Account"} <span className="text-destructive">*</span>
                 </Label>
                 <Select
                   value={selectedAccountId || ""}
@@ -229,7 +230,7 @@ export function EditTransactionDialog({
               {/* Destination Account (To) */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium">
-                  To Account <span className="text-destructive">*</span>
+                  {selectedType === "loan_repayment" ? "Loan Account" : "To Account"} <span className="text-destructive">*</span>
                 </Label>
                 <Select
                   value={selectedDestAccountId || ""}
@@ -265,6 +266,53 @@ export function EditTransactionDialog({
                     {errors.destinationAccountId.message}
                   </p>
                 )}
+              </div>
+            </div>
+          ) : selectedType === "adjustment" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">
+                  Account <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={selectedAccountId || ""}
+                  onValueChange={(val) =>
+                    setValue("accountId", val, { shouldValidate: true })
+                  }
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: acc.color || "#3b82f6" }}
+                          />
+                          <span>{acc.name}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                            ({acc.currency})
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.accountId && (
+                  <p className="text-xs text-destructive">
+                    {errors.accountId.message}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5 flex flex-col justify-end">
+                <Label className="text-xs font-medium">Adjustment Type</Label>
+                <div className="h-9 flex items-center px-3 rounded-md border border-border bg-muted/30 text-xs font-mono capitalize">
+                  {(transaction as any).adjustment_type || "Adjustment"}
+                </div>
               </div>
             </div>
           ) : (
