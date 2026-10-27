@@ -88,15 +88,42 @@ export async function createTransactionAction(
     adjustmentType,
   } = result.data;
 
-  // 1. Verify source account ownership
-  const { data: sourceAcc, error: sourceErr } = await supabase
-    .from("accounts")
-    .select("id, user_id")
-    .eq("id", accountId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // 1-4. Parallelize independent validation queries (source account, destination account, category, original transaction)
+  const [sourceAccResult, destAccResult, catResult, origTxResult] =
+    await Promise.all([
+      supabase
+        .from("accounts")
+        .select("id, user_id")
+        .eq("id", accountId)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      destinationAccountId
+        ? supabase
+            .from("accounts")
+            .select("id, user_id")
+            .eq("id", destinationAccountId)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      categoryId
+        ? supabase
+            .from("categories")
+            .select("id, user_id, is_system")
+            .eq("id", categoryId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      originalTransactionId
+        ? supabase
+            .from("transactions")
+            .select("id, user_id")
+            .eq("id", originalTransactionId)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
-  if (sourceErr || !sourceAcc) {
+  // 1. Verify source account ownership
+  if (sourceAccResult.error || !sourceAccResult.data) {
     return {
       success: false,
       error: "Source account not found or access denied.",
@@ -104,31 +131,17 @@ export async function createTransactionAction(
   }
 
   // 2. If transfer, verify destination account ownership
-  if (destinationAccountId) {
-    const { data: destAcc, error: destErr } = await supabase
-      .from("accounts")
-      .select("id, user_id")
-      .eq("id", destinationAccountId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (destErr || !destAcc) {
-      return {
-        success: false,
-        error: "Destination account not found or access denied.",
-      };
-    }
+  if (destinationAccountId && (destAccResult.error || !destAccResult.data)) {
+    return {
+      success: false,
+      error: "Destination account not found or access denied.",
+    };
   }
 
   // 3. If categoryId provided, verify ownership or system category
   if (categoryId) {
-    const { data: cat, error: catErr } = await supabase
-      .from("categories")
-      .select("id, user_id, is_system")
-      .eq("id", categoryId)
-      .maybeSingle();
-
-    if (catErr || !cat || (!cat.is_system && cat.user_id !== user.id)) {
+    const cat = catResult.data;
+    if (catResult.error || !cat || (!cat.is_system && cat.user_id !== user.id)) {
       return {
         success: false,
         error: "Category not found or access denied.",
@@ -137,20 +150,11 @@ export async function createTransactionAction(
   }
 
   // 4. If originalTransactionId provided, verify user ownership
-  if (originalTransactionId) {
-    const { data: origTx, error: origErr } = await supabase
-      .from("transactions")
-      .select("id, user_id")
-      .eq("id", originalTransactionId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (origErr || !origTx) {
-      return {
-        success: false,
-        error: "Original transaction not found or access denied.",
-      };
-    }
+  if (originalTransactionId && (origTxResult.error || !origTxResult.data)) {
+    return {
+      success: false,
+      error: "Original transaction not found or access denied.",
+    };
   }
 
   // 5. Insert transaction into ledger (PostgreSQL trigger automatically adjusts balances)
@@ -798,14 +802,31 @@ export async function createLoanRepaymentAction(
     notes,
   } = result.data;
 
-  // 1. Verify paying account (must be asset account owned by user)
-  const { data: payingAcc, error: payingErr } = await supabase
-    .from("accounts")
-    .select("id, name, type, currency, user_id")
-    .eq("id", payingAccountId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // Parallelize paying account, loan account, and optional interest category verification
+  const [payingAccResult, loanAccResult, intCatResult] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, name, type, currency, user_id")
+      .eq("id", payingAccountId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("accounts")
+      .select("id, name, type, currency, user_id")
+      .eq("id", loanAccountId)
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    interestAmount && interestAmount > 0 && interestCategoryId
+      ? supabase
+          .from("categories")
+          .select("id, type, user_id, is_system")
+          .eq("id", interestCategoryId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
 
+  // 1. Verify paying account (must be asset account owned by user)
+  const { data: payingAcc, error: payingErr } = payingAccResult;
   if (payingErr || !payingAcc) {
     return {
       success: false,
@@ -822,13 +843,7 @@ export async function createLoanRepaymentAction(
   }
 
   // 2. Verify loan account (must be liability account owned by user)
-  const { data: loanAcc, error: loanErr } = await supabase
-    .from("accounts")
-    .select("id, name, type, currency, user_id")
-    .eq("id", loanAccountId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
+  const { data: loanAcc, error: loanErr } = loanAccResult;
   if (loanErr || !loanAcc) {
     return {
       success: false,
@@ -851,11 +866,7 @@ export async function createLoanRepaymentAction(
         error: "Category is required for interest expense.",
       };
     }
-    const { data: intCat, error: intCatErr } = await supabase
-      .from("categories")
-      .select("id, type, user_id, is_system")
-      .eq("id", interestCategoryId)
-      .maybeSingle();
+    const { data: intCat, error: intCatErr } = intCatResult;
 
     if (intCatErr || !intCat || (!intCat.is_system && intCat.user_id !== user.id)) {
       return {
@@ -964,20 +975,11 @@ export async function createLoanRepaymentAction(
     };
   }
 
-  // 5. Fetch populated transaction for client state
-  const { data: finalTx } = await supabase
-    .from("transactions")
-    .select(TRANSACTION_SELECT_QUERY)
-    .eq("id", repaymentTxId)
-    .single();
-
   revalidatePath("/accounts");
   revalidatePath("/dashboard");
   revalidatePath("/transactions");
-  revalidatePath("/analytics");
 
   return {
     success: true,
-    data: (finalTx as unknown as TransactionWithRelations) || undefined,
   };
 }
