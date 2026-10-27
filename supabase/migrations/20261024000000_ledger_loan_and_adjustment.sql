@@ -462,7 +462,7 @@ BEGIN
       bs.category_color,
       bs.budgeted_amount,
       COALESCE(crp.effective_expense, 0.00)::NUMERIC(14, 2) AS actual_spent,
-      COALESCE(crp.raw_net_spent, 0.00)::NUMERIC(14, 2) AS raw_net_spent,
+      COALESCE(crp.raw_net_expense, 0.00)::NUMERIC(14, 2) AS raw_net_spent,
       (bs.budgeted_amount - COALESCE(crp.effective_expense, 0.00))::NUMERIC(14, 2) AS variance,
       CASE
         WHEN bs.budgeted_amount > 0 THEN
