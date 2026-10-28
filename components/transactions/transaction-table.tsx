@@ -299,8 +299,9 @@ export function TransactionTable({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <ExportCsvButton
+            className="flex-1 sm:flex-initial text-xs sm:text-sm h-9 px-3 sm:px-4"
             filters={{
               searchQuery: filters.q,
               selectedAccount: filters.account,
@@ -311,14 +312,14 @@ export function TransactionTable({
           <Button
             variant="outline"
             onClick={() => setLoanRepayOpen(true)}
-            className="gap-2 shadow-xs"
+            className="flex-1 sm:flex-initial gap-2 shadow-xs text-xs sm:text-sm h-9 px-3 sm:px-4"
           >
             <Receipt className="h-4 w-4 text-primary" />
             <span>Loan Repayment</span>
           </Button>
           <Button
             onClick={() => setCreateOpen(true)}
-            className="gap-2 shadow-xs"
+            className="flex-1 sm:flex-initial gap-2 shadow-xs text-xs sm:text-sm h-9 px-3 sm:px-4 min-w-[130px]"
           >
             <Plus className="h-4 w-4" />
             <span>Add Transaction</span>

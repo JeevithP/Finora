@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect, useTransition, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -61,6 +61,7 @@ export function CreateTransactionDialog({
 }: CreateTransactionDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [isSubmitting, startTransition] = useTransition();
+  const isSubmittingRef = useRef(false);
 
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
@@ -164,6 +165,9 @@ export function CreateTransactionDialog({
   };
 
   const onSubmit = (values: CreateTransactionInput) => {
+    if (isSubmittingRef.current || isSubmitting) return;
+    isSubmittingRef.current = true;
+
     const finalValues: CreateTransactionInput = {
       ...values,
       accountId: values.accountId || activeAccounts[0]?.id || "",
@@ -184,6 +188,7 @@ export function CreateTransactionDialog({
         const res = await createTransactionAction(finalValues);
         if (res.success) {
           toast.success("Transaction recorded successfully!");
+          setOpen(false);
           reset({
             type: "expense",
             amount: 0,
@@ -195,12 +200,14 @@ export function CreateTransactionDialog({
             categoryId: defaultFirstExpCat,
             originalTransactionId: null,
           });
-          setOpen(false);
         } else {
           toast.error(res.error || "Failed to record transaction");
         }
-      } catch {
+      } catch (err: unknown) {
+        console.error("Transaction creation error:", err);
         toast.error("An unexpected error occurred while saving the transaction.");
+      } finally {
+        isSubmittingRef.current = false;
       }
     });
   };
@@ -225,7 +232,24 @@ export function CreateTransactionDialog({
         </DialogTrigger>
       ) : null}
 
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="sm:max-w-lg max-h-[90vh] overflow-y-auto"
+        onCloseAutoFocus={(e) => {
+          if (typeof document !== "undefined") {
+            const active = document.activeElement;
+            if (!active || active === document.body || !document.body.contains(active)) {
+              const main = document.querySelector("main");
+              if (main) {
+                if (!main.hasAttribute("tabindex")) {
+                  main.setAttribute("tabindex", "-1");
+                }
+                (main as HTMLElement).focus({ preventScroll: true });
+                e.preventDefault();
+              }
+            }
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">
             Record Transaction
@@ -537,7 +561,7 @@ export function CreateTransactionDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || activeAccounts.length === 0}
+              disabled={isSubmitting || isSubmittingRef.current || activeAccounts.length === 0}
               className="gap-2"
             >
               {isSubmitting ? (

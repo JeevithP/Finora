@@ -72,12 +72,12 @@ export function DashboardHeader({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           <Button
             variant="outline"
             size="sm"
             asChild
-            className="gap-1.5 shadow-2xs h-9 text-xs"
+            className="gap-1.5 shadow-2xs h-9 text-xs flex-1 sm:flex-initial"
           >
             <Link href="/accounts">
               <Landmark className="h-3.5 w-3.5" />
@@ -87,7 +87,7 @@ export function DashboardHeader({
           <Button
             onClick={onAddTransaction}
             size="sm"
-            className="gap-1.5 shadow-xs h-9 text-xs"
+            className="gap-1.5 shadow-xs h-9 text-xs flex-1 sm:flex-initial"
           >
             <Plus className="h-4 w-4" />
             <span>Record Transaction</span>
@@ -109,12 +109,12 @@ export function DashboardHeader({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5">
+      <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
         <Button
           variant="outline"
           size="sm"
           asChild
-          className="gap-1.5 shadow-2xs h-9 text-xs"
+          className="gap-1.5 shadow-2xs h-9 text-xs flex-1 sm:flex-initial"
         >
           <Link href="/accounts">
             <Landmark className="h-3.5 w-3.5" />
@@ -124,7 +124,7 @@ export function DashboardHeader({
         <Button
           onClick={onAddTransaction}
           size="sm"
-          className="gap-1.5 shadow-xs h-9 text-xs"
+          className="gap-1.5 shadow-xs h-9 text-xs flex-1 sm:flex-initial"
         >
           <Plus className="h-4 w-4" />
           <span>Add Transaction</span>
