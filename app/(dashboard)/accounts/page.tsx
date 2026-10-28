@@ -20,13 +20,9 @@ export default async function AccountsPage() {
     getUserProfile(user.id),
     supabase
       .from("accounts")
-      .select(
-        "*, tx_src:transactions!transactions_account_id_fkey(id), tx_dst:transactions!transactions_destination_account_id_fkey(id)"
-      )
+      .select("*")
       .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1, { foreignTable: "tx_src" })
-      .limit(1, { foreignTable: "tx_dst" }),
+      .order("created_at", { ascending: false }),
     supabase
       .from("categories")
       .select("*")
@@ -40,25 +36,7 @@ export default async function AccountsPage() {
     console.error("Failed to load accounts:", accountsResult.error);
   }
 
-  type RawAccountWithTx = Account & {
-    tx_src?: { id: string }[];
-    tx_dst?: { id: string }[];
-  };
-
-  const rawAccounts = (accountsResult.data ||
-    []) as unknown as RawAccountWithTx[];
-
-  const transactionCounts: Record<string, number> = {};
-  const accounts: Account[] = rawAccounts.map((rawAcc) => {
-    const { tx_src, tx_dst, ...account } = rawAcc;
-    const srcCount = tx_src?.length || 0;
-    const dstCount = tx_dst?.length || 0;
-    if (srcCount > 0 || dstCount > 0) {
-      transactionCounts[account.id] = srcCount + dstCount;
-    }
-    return account as Account;
-  });
-
+  const accounts = (accountsResult.data || []) as Account[];
   const categories = (categoriesResult.data || []) as Category[];
 
   return (
@@ -90,7 +68,6 @@ export default async function AccountsPage() {
       <AccountGrid
         accounts={accounts}
         defaultCurrency={defaultCurrency}
-        transactionCounts={transactionCounts}
         categories={categories}
       />
     </div>

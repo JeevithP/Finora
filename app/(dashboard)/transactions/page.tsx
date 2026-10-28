@@ -85,12 +85,19 @@ export default async function TransactionsPage({
     return query.range(from, to);
   };
 
-  // Parallelize independent data fetches: user profile, accounts, categories, total ledger count, and filtered transactions
+  // Detect whether search or filter parameters are active
+  const hasActiveFilters = Boolean(
+    params.q ||
+    params.account !== "all" ||
+    params.category !== "all" ||
+    params.type !== "all"
+  );
+
+  // Parallelize independent data fetches: user profile, accounts, categories, and filtered transactions
   const [
     profile,
     accountsResult,
     categoriesResult,
-    totalLedgerResult,
     transactionsResult,
   ] = await Promise.all([
     getUserProfile(user.id),
@@ -104,24 +111,33 @@ export default async function TransactionsPage({
       .select("*")
       .or(`user_id.eq.${user.id},is_system.eq.true`)
       .order("name", { ascending: true }),
-    supabase
-      .from("transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id),
     buildFilteredQuery(params.page, params.pageSize, true),
   ]);
 
   const defaultCurrency = profile?.default_currency || "INR";
   const accounts = (accountsResult.data || []) as Account[];
   const categories = (categoriesResult.data || []) as Category[];
-  const totalLedgerCount = totalLedgerResult.count ?? 0;
-  const hasAnyTransactions = totalLedgerCount > 0;
 
   let transactions = (transactionsResult.data ||
     []) as unknown as TransactionWithRelations[];
   const totalCount = transactionsResult.count ?? 0;
   let currentPage = params.page;
   const totalPages = Math.max(1, Math.ceil(totalCount / params.pageSize));
+
+  // Determine whether any transaction exists across the entire ledger:
+  // 1. If totalCount > 0, transactions definitely exist in ledger (no extra query).
+  // 2. If totalCount === 0 and no filters are active, ledger is genuinely empty (no extra query).
+  // 3. If totalCount === 0 and filters are active, run an O(1) existence check to distinguish
+  //    a filtered-empty result from a genuinely empty ledger.
+  let hasAnyTransactions = totalCount > 0;
+  if (!hasAnyTransactions && hasActiveFilters) {
+    const { data: ledgerRows } = await supabase
+      .from("transactions")
+      .select("id")
+      .eq("user_id", user.id)
+      .limit(1);
+    hasAnyTransactions = Boolean(ledgerRows && ledgerRows.length > 0);
+  }
 
   // If user requested an out-of-range page (e.g. page 5 when only 1 page exists), gracefully fallback to page 1
   if (transactions.length === 0 && totalCount > 0 && currentPage > 1) {
