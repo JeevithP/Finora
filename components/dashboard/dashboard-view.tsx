@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import dynamic from "next/dynamic";
-import { Account, Category } from "@/types/database.types";
+import { Account } from "@/types/database.types";
 import { AnalyticsSummary, BudgetVsActualItem } from "@/lib/analytics/types";
 import { FinancialInsight } from "@/lib/insights/types";
 import { TransactionWithRelations } from "@/actions/transactions";
@@ -40,7 +40,6 @@ interface DashboardViewProps {
   budgetVsActual: BudgetVsActualItem[];
   recentTransactions: TransactionWithRelations[];
   accounts: Account[];
-  categories: Category[];
   insights: FinancialInsight[];
   defaultCurrency: string;
   hasTransactions?: boolean;
@@ -54,7 +53,6 @@ export function DashboardView({
   budgetVsActual,
   recentTransactions,
   accounts,
-  categories,
   insights,
   defaultCurrency,
   hasTransactions: explicitHasTransactions,
@@ -207,7 +205,6 @@ export function DashboardView({
       {/* Quick Add Transaction Dialog */}
       <CreateTransactionDialog
         accounts={accounts}
-        categories={categories}
         defaultCurrency={defaultCurrency}
         open={createTxOpen}
         onOpenChange={setCreateTxOpen}

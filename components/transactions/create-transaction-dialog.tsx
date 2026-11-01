@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useTransition, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useTransition,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -20,6 +27,7 @@ import {
 } from "@/lib/validations/transaction";
 import { createTransactionAction } from "@/actions/transactions";
 import { Account, Category } from "@/types/database.types";
+import { createClient } from "@/lib/supabase/client";
 import {
   Dialog,
   DialogContent,
@@ -41,9 +49,36 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+// User-scoped in-memory category cache: maps authenticated userId -> Category[]
+const userCategoryCache = new Map<string, Category[]>();
+
+// In-flight request deduplication map: maps authenticated userId -> Promise<Category[]>
+const pendingCategoryRequests = new Map<string, Promise<Category[]>>();
+
+// Active authenticated user tracking to ensure stale requests from previous users are discarded
+let currentAuthUserId: string | null = null;
+
+export function __resetCategoriesCacheForTesting() {
+  userCategoryCache.clear();
+  pendingCategoryRequests.clear();
+  currentAuthUserId = null;
+}
+
+export function __getUserCategoryCacheForTesting() {
+  return userCategoryCache;
+}
+
+export function __getPendingCategoryRequestsForTesting() {
+  return pendingCategoryRequests;
+}
+
+export function __setCurrentAuthUserIdForTesting(userId: string | null) {
+  currentAuthUserId = userId;
+}
+
 interface CreateTransactionDialogProps {
   accounts: Account[];
-  categories: Category[];
+  categories?: Category[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   trigger?: React.ReactNode;
@@ -53,7 +88,7 @@ interface CreateTransactionDialogProps {
 
 export function CreateTransactionDialog({
   accounts,
-  categories,
+  categories: categoriesProp,
   open: controlledOpen,
   onOpenChange: setControlledOpen,
   trigger,
@@ -63,11 +98,81 @@ export function CreateTransactionDialog({
   const [isSubmitting, startTransition] = useTransition();
   const isSubmittingRef = useRef(false);
 
+  // State for lazy-loaded categories
+  const [loadedCategories, setLoadedCategories] = useState<Category[] | null>(
+    () => categoriesProp ?? null
+  );
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  const currentUserIdRef = useRef<string | null>(currentAuthUserId);
+
+  // Supabase Auth Lifecycle Subscription
+  useEffect(() => {
+    isMountedRef.current = true;
+    const supabase = createClient();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      const newUserId = session?.user?.id ?? null;
+      currentAuthUserId = newUserId;
+      currentUserIdRef.current = newUserId;
+
+      if (event === "SIGNED_OUT" || !newUserId) {
+        // Immediate cache invalidation on logout
+        userCategoryCache.clear();
+        pendingCategoryRequests.clear();
+        currentAuthUserId = null;
+        if (isMountedRef.current) {
+          setLoadedCategories(null);
+          setCategoryError(null);
+        }
+      } else if (
+        event === "SIGNED_IN" ||
+        event === "USER_UPDATED" ||
+        event === "TOKEN_REFRESHED"
+      ) {
+        if (isMountedRef.current) {
+          const cached = userCategoryCache.get(newUserId) ?? null;
+          setLoadedCategories(cached);
+          setCategoryError(null);
+        }
+      }
+    });
+
+    return () => {
+      isMountedRef.current = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Synchronize when categoriesProp changes
+  useEffect(() => {
+    if (categoriesProp) {
+      setLoadedCategories(categoriesProp);
+      setCategoryError(null);
+    }
+  }, [categoriesProp]);
+
+  // Fallback to user-scoped cached or loaded categories
+  const categories = useMemo(() => {
+    if (categoriesProp) return categoriesProp;
+    if (loadedCategories) return loadedCategories;
+    if (currentUserIdRef.current && userCategoryCache.has(currentUserIdRef.current)) {
+      return userCategoryCache.get(currentUserIdRef.current)!;
+    }
+    return [];
+  }, [categoriesProp, loadedCategories]);
+
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = isControlled ? setControlledOpen! : setInternalOpen;
 
-  const activeAccounts = accounts.filter((a) => !a.is_archived);
+  const activeAccounts = useMemo(
+    () => accounts.filter((a) => !a.is_archived),
+    [accounts]
+  );
   const todayStr = new Date().toISOString().split("T")[0];
 
   const defaultFirstAcc = defaultAccountId || activeAccounts[0]?.id || "";
@@ -109,7 +214,120 @@ export function CreateTransactionDialog({
     return false;
   });
 
-  // Re-sync default values when dialog opens or accounts change
+  // Function to load categories on demand (callable by useEffect on open or retry button)
+  const loadCategories = useCallback(
+    async (force = false) => {
+      if (categoriesProp) return;
+      if (!isMountedRef.current) return;
+
+      setIsLoadingCategories(true);
+      setCategoryError(null);
+
+      try {
+        const supabase = createClient();
+        let userId = currentUserIdRef.current;
+        if (!userId) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          userId = sessionData?.session?.user?.id ?? null;
+          if (!userId) {
+            const { data: userData } = await supabase.auth.getUser();
+            userId = userData?.user?.id ?? null;
+          }
+          if (userId) {
+            currentAuthUserId = userId;
+            currentUserIdRef.current = userId;
+          }
+        }
+
+        if (!userId) {
+          if (isMountedRef.current) {
+            setCategoryError("Please sign in to view categories.");
+            setIsLoadingCategories(false);
+          }
+          return;
+        }
+
+        // Cache hit check: reuse cached categories ONLY when the authenticated user ID matches
+        if (!force && userCategoryCache.has(userId)) {
+          const cached = userCategoryCache.get(userId)!;
+          if (isMountedRef.current && currentUserIdRef.current === userId) {
+            setLoadedCategories(cached);
+            setIsLoadingCategories(false);
+            setCategoryError(null);
+          }
+          return;
+        }
+
+        // In-flight request deduplication for the same authenticated user
+        let requestPromise = pendingCategoryRequests.get(userId);
+        if (!requestPromise || force) {
+          let fetchPromise: Promise<Category[]> = null!;
+          fetchPromise = (async () => {
+            try {
+              const { data, error } = await supabase
+                .from("categories")
+                .select("*")
+                .order("name", { ascending: true });
+
+              if (error) {
+                throw new Error(error.message || "Failed to load categories");
+              }
+              return (data || []) as Category[];
+            } finally {
+              if (pendingCategoryRequests.get(userId) === fetchPromise) {
+                pendingCategoryRequests.delete(userId);
+              }
+            }
+          })();
+
+          pendingCategoryRequests.set(userId, fetchPromise);
+          requestPromise = fetchPromise;
+        }
+
+        const data = await requestPromise;
+
+        // Stale request protection: verify that the user did not switch or log out during fetch
+        if (currentAuthUserId !== userId) {
+          // Discard result: request belongs to an older/different user session
+          return;
+        }
+
+        // Cache under the verified authenticated userId
+        userCategoryCache.set(userId, data);
+
+        if (isMountedRef.current && currentUserIdRef.current === userId) {
+          setLoadedCategories(data);
+          setCategoryError(null);
+        }
+      } catch (err: unknown) {
+        if (currentAuthUserId !== currentUserIdRef.current) return;
+        const msg =
+          err instanceof Error ? err.message : "Failed to load categories";
+        if (isMountedRef.current) {
+          setCategoryError(msg);
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoadingCategories(false);
+        }
+      }
+    },
+    [categoriesProp]
+  );
+
+  const handleRetryCategories = useCallback(() => {
+    loadCategories(true);
+  }, [loadCategories]);
+
+  // Lazy-fetch categories only when dialog opens and categories are not yet loaded
+  useEffect(() => {
+    if (categoriesProp) return;
+    if (!open) return;
+
+    loadCategories();
+  }, [open, categoriesProp, loadCategories]);
+
+  // Re-sync default values when dialog opens, accounts change, or categories become available
   useEffect(() => {
     if (open && activeAccounts.length > 0) {
       const firstAcc = defaultAccountId || activeAccounts[0]?.id || "";
@@ -129,10 +347,17 @@ export function CreateTransactionDialog({
         });
       } else {
         setValue("destinationAccountId", null);
-        setValue("categoryId", catForType, { shouldValidate: true });
+        const currentValid = categories.some(
+          (c) =>
+            c.id === selectedCategoryId &&
+            (selectedType === "refund" || c.type === selectedType)
+        );
+        if (!currentValid && catForType) {
+          setValue("categoryId", catForType, { shouldValidate: true });
+        }
       }
     }
-  }, [open, selectedType, defaultAccountId, accounts, categories, setValue]);
+  }, [open, selectedType, defaultAccountId, activeAccounts, categories, selectedCategoryId, setValue]);
 
   // Handle Type Change
   const handleTypeChange = (newType: TransactionType) => {
@@ -166,6 +391,12 @@ export function CreateTransactionDialog({
 
   const onSubmit = (values: CreateTransactionInput) => {
     if (isSubmittingRef.current || isSubmitting) return;
+
+    if (values.type !== "transfer" && categories.length === 0) {
+      toast.error("Please wait for categories to finish loading.");
+      return;
+    }
+
     isSubmittingRef.current = true;
 
     const finalValues: CreateTransactionInput = {
@@ -189,6 +420,8 @@ export function CreateTransactionDialog({
         if (res.success) {
           toast.success("Transaction recorded successfully!");
           setOpen(false);
+          const firstExpCat =
+            categories.find((c) => c.type === "expense")?.id || null;
           reset({
             type: "expense",
             amount: 0,
@@ -197,7 +430,7 @@ export function CreateTransactionDialog({
             notes: "",
             accountId: defaultFirstAcc,
             destinationAccountId: null,
-            categoryId: defaultFirstExpCat,
+            categoryId: firstExpCat,
             originalTransactionId: null,
           });
         } else {
@@ -486,45 +719,79 @@ export function CreateTransactionDialog({
 
               {/* Category Selector */}
               <div className="space-y-1.5">
-                <Label className="text-xs font-medium">
-                  Category{" "}
-                  {selectedType === "refund" ? (
-                    <span className="text-muted-foreground">(Optional)</span>
-                  ) : (
-                    <span className="text-destructive">*</span>
-                  )}
-                </Label>
-                <Select
-                  value={selectedCategoryId || availableCategories[0]?.id || "none"}
-                  onValueChange={(val) =>
-                    setValue("categoryId", val === "none" ? null : val, {
-                      shouldValidate: true,
-                    })
-                  }
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger id="tx-category">
-                    <SelectValue placeholder="Select Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {selectedType === "refund" && (
-                      <SelectItem value="none">
-                        <span className="text-muted-foreground">None</span>
-                      </SelectItem>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="tx-category" className="text-xs font-medium">
+                    Category{" "}
+                    {selectedType === "refund" ? (
+                      <span className="text-muted-foreground">(Optional)</span>
+                    ) : (
+                      <span className="text-destructive">*</span>
                     )}
-                    {availableCategories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: cat.color || "#64748b" }}
-                          />
-                          <span>{cat.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  </Label>
+                  {isLoadingCategories && (
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Loading...</span>
+                    </span>
+                  )}
+                </div>
+
+                {isLoadingCategories && categories.length === 0 ? (
+                  <div className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Loading categories...</span>
+                  </div>
+                ) : categoryError && categories.length === 0 ? (
+                  <div className="flex h-9 w-full items-center justify-between rounded-md border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+                    <span className="truncate">{categoryError}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRetryCategories}
+                      className="h-6 px-2 text-xs text-destructive hover:bg-destructive/20"
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <Select
+                    value={
+                      selectedCategoryId ||
+                      (selectedType === "refund"
+                        ? "none"
+                        : availableCategories[0]?.id || "")
+                    }
+                    onValueChange={(val) =>
+                      setValue("categoryId", val === "none" ? null : val, {
+                        shouldValidate: true,
+                      })
+                    }
+                    disabled={isSubmitting || availableCategories.length === 0}
+                  >
+                    <SelectTrigger id="tx-category">
+                      <SelectValue placeholder="Select Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedType === "refund" && (
+                        <SelectItem value="none">
+                          <span className="text-muted-foreground">None</span>
+                        </SelectItem>
+                      )}
+                      {availableCategories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id}>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ backgroundColor: cat.color || "#64748b" }}
+                            />
+                            <span>{cat.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 {errors.categoryId && (
                   <p className="text-xs text-destructive">
                     {errors.categoryId.message}
@@ -561,7 +828,14 @@ export function CreateTransactionDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || isSubmittingRef.current || activeAccounts.length === 0}
+              disabled={
+                isSubmitting ||
+                isSubmittingRef.current ||
+                activeAccounts.length === 0 ||
+                (selectedType !== "transfer" &&
+                  (isLoadingCategories ||
+                    (categories.length === 0 && Boolean(categoryError))))
+              }
               className="gap-2"
             >
               {isSubmitting ? (

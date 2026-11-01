@@ -3,7 +3,7 @@ import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
 import { createClient } from "@/lib/supabase/server";
 import { getAnalyticsData } from "@/lib/analytics/queries";
 import { TRANSACTION_SELECT_QUERY } from "@/lib/constants";
-import { Account, Category } from "@/types/database.types";
+import { Account } from "@/types/database.types";
 import { TransactionWithRelations } from "@/actions/transactions";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 
@@ -21,8 +21,8 @@ export default async function DashboardPage() {
   const profile = await getUserProfile(user.id);
   const defaultCurrency = profile?.default_currency || "INR";
 
-  // Parallelize analytics, accounts, recent transactions, and categories
-  const [analyticsData, accountsResult, recentTxResult, categoriesResult] =
+  // Parallelize analytics, accounts, and recent transactions
+  const [analyticsData, accountsResult, recentTxResult] =
     await Promise.all([
       getAnalyticsData(user.id, defaultCurrency, "this_month"),
       supabase
@@ -37,17 +37,11 @@ export default async function DashboardPage() {
         .order("date", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(5),
-      supabase
-        .from("categories")
-        .select("*")
-        .or(`user_id.eq.${user.id},is_system.eq.true`)
-        .order("name", { ascending: true }),
     ]);
 
   const accounts = (accountsResult.data || []) as Account[];
   const recentTransactions = (recentTxResult.data ||
     []) as unknown as TransactionWithRelations[];
-  const categories = (categoriesResult.data || []) as Category[];
 
   // Authoritative existence of any transaction in ledger
   const hasTransactions = Boolean(
@@ -87,7 +81,6 @@ export default async function DashboardPage() {
       budgetVsActual={analyticsData.budgetVsActual}
       recentTransactions={recentTransactions}
       accounts={accounts}
-      categories={categories}
       insights={analyticsData.insights || []}
       defaultCurrency={defaultCurrency}
       hasTransactions={hasTransactions}
