@@ -98,7 +98,8 @@ interface RpcAnalyticsResponse {
 export async function getAnalyticsData(
   userId: string,
   defaultCurrency: string = "INR",
-  periodKey: AnalyticsPeriodKey = "this_month"
+  periodKey: AnalyticsPeriodKey = "this_month",
+  includeTrend: boolean = true
 ): Promise<AnalyticsData> {
   const period = getPeriodInterval(periodKey);
   const previousPeriod = getPreviousPeriodInterval(periodKey);
@@ -111,6 +112,7 @@ export async function getAnalyticsData(
     p_prev_end_date_exclusive: previousPeriod.endDateExclusive,
     p_default_currency: defaultCurrency,
     p_months: period.months as unknown as Json,
+    p_include_trend: includeTrend,
   });
 
   if (error) {

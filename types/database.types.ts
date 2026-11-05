@@ -260,6 +260,7 @@ export interface Database {
           p_prev_end_date_exclusive: string;
           p_default_currency?: string;
           p_months?: Json;
+          p_include_trend?: boolean;
         };
         Returns: Json;
       };

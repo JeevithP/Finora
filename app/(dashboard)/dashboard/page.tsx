@@ -24,7 +24,7 @@ export default async function DashboardPage() {
   // Parallelize analytics, accounts, and recent transactions
   const [analyticsData, accountsResult, recentTxResult] =
     await Promise.all([
-      getAnalyticsData(user.id, defaultCurrency, "this_month"),
+      getAnalyticsData(user.id, defaultCurrency, "this_month", false),
       supabase
         .from("accounts")
         .select("*")
