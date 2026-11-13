@@ -7,6 +7,7 @@ import { getAuthenticatedUser, getUserProfile } from "@/lib/auth/cached";
 import { parsePeriodKey } from "@/lib/analytics/periods";
 import { getAnalyticsData } from "@/lib/analytics/queries";
 import { AnalyticsPeriodSelector } from "@/components/analytics/analytics-period-selector";
+import { ExportReportButton } from "@/components/analytics/export-report-button";
 import { AnalyticsSummaryCards } from "@/components/analytics/analytics-summary-cards";
 import { FinancialInsightsCard } from "@/components/insights/financial-insights-card";
 import { BudgetVsActualCard } from "@/components/analytics/budget-vs-actual-card";
@@ -42,6 +43,8 @@ export const dynamic = "force-dynamic";
 interface AnalyticsPageProps {
   searchParams?: Promise<{
     period?: string;
+    from?: string;
+    to?: string;
   }>;
 }
 
@@ -55,11 +58,20 @@ export default async function AnalyticsPage({
 
   const resolvedParams = searchParams ? await searchParams : {};
   const periodKey = parsePeriodKey(resolvedParams.period);
+  const customFrom = resolvedParams.from;
+  const customTo = resolvedParams.to;
 
   const profile = await getUserProfile(user.id);
   const defaultCurrency = profile?.default_currency || "INR";
 
-  const data = await getAnalyticsData(user.id, defaultCurrency, periodKey);
+  const data = await getAnalyticsData(
+    user.id,
+    defaultCurrency,
+    periodKey,
+    true,
+    customFrom,
+    customTo
+  );
 
   const isMultiMonth = data.period.months.length > 1;
 
@@ -81,8 +93,19 @@ export default async function AnalyticsPage({
           </p>
         </div>
 
-        {/* Period Selector Controls */}
-        <AnalyticsPeriodSelector currentPeriod={periodKey} />
+        {/* Period Selector Controls & Export Report */}
+        <div className="flex flex-wrap items-center gap-2">
+          <AnalyticsPeriodSelector
+            currentPeriod={periodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+          />
+          <ExportReportButton
+            periodKey={periodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+          />
+        </div>
       </div>
 
       {/* Multi-Currency Notice Banner */}
@@ -127,6 +150,7 @@ export default async function AnalyticsPage({
             unbudgeted={data.unbudgetedSpending}
             defaultCurrency={defaultCurrency}
             isMultiMonth={isMultiMonth}
+            isProrated={Boolean(data.period.isCustom && data.period.isPartialBudget)}
           />
         </div>
       )}

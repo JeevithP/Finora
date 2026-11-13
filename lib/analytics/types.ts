@@ -5,7 +5,8 @@ export type AnalyticsPeriodKey =
   | "last_month"
   | "last_3_months"
   | "last_6_months"
-  | "this_year";
+  | "this_year"
+  | "custom";
 
 export interface MonthBucket {
   year: number;
@@ -20,6 +21,10 @@ export interface PeriodInterval {
   startDate: string; // "YYYY-MM-DD"
   endDateExclusive: string; // "YYYY-MM-DD"
   months: MonthBucket[];
+  isCustom?: boolean;
+  customStartDate?: string;
+  customEndDate?: string;
+  isPartialBudget?: boolean;
 }
 
 export interface AnalyticsSummary {

@@ -88,6 +88,8 @@ interface TransactionTableProps {
     account: string;
     category: string;
     type: string;
+    from?: string;
+    to?: string;
   };
 }
 
@@ -154,6 +156,8 @@ export function TransactionTable({
   const handlePageChange = (page: number) => updateUrl({ page }, false);
   const handlePageSizeChange = (newPageSize: number) =>
     updateUrl({ pageSize: newPageSize }, true);
+  const handleDateRangeChange = (from?: string, to?: string) =>
+    updateUrl({ from: from || undefined, to: to || undefined }, true);
 
   const handleResetFilters = () => {
     startTransition(() => {
@@ -166,6 +170,8 @@ export function TransactionTable({
     filters.account !== "all" ||
     filters.type !== "all" ||
     filters.category !== "all" ||
+    Boolean(filters.from) ||
+    Boolean(filters.to) ||
     currentPage > 1 ||
     pageSize !== 25;
 
@@ -307,6 +313,8 @@ export function TransactionTable({
               selectedAccount: filters.account,
               selectedType: filters.type,
               selectedCategory: filters.category,
+              from: filters.from,
+              to: filters.to,
             }}
           />
           <Button
@@ -345,6 +353,9 @@ export function TransactionTable({
             onTypeChange={handleTypeChange}
             selectedCategory={filters.category}
             onCategoryChange={handleCategoryChange}
+            fromDate={filters.from}
+            toDate={filters.to}
+            onDateRangeChange={handleDateRangeChange}
             onResetFilters={handleResetFilters}
           />
 

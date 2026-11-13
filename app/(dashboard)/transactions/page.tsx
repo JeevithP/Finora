@@ -73,13 +73,21 @@ export default async function TransactionsPage({
       query = query.eq("type", params.type);
     }
 
-    // 5. Deterministic Ordering (Date DESC, CreatedAt DESC, ID DESC)
+    // 5. Date Range Filter
+    if (params.from) {
+      query = query.gte("date", params.from);
+    }
+    if (params.to) {
+      query = query.lte("date", params.to);
+    }
+
+    // 6. Deterministic Ordering (Date DESC, CreatedAt DESC, ID DESC)
     query = query
       .order("date", { ascending: false })
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
 
-    // 6. Range pagination
+    // 7. Range pagination
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
     return query.range(from, to);
@@ -90,7 +98,9 @@ export default async function TransactionsPage({
     params.q ||
     params.account !== "all" ||
     params.category !== "all" ||
-    params.type !== "all"
+    params.type !== "all" ||
+    params.from ||
+    params.to
   );
 
   // Parallelize independent data fetches: user profile, accounts, categories, and filtered transactions
@@ -163,6 +173,8 @@ export default async function TransactionsPage({
         account: params.account,
         category: params.category,
         type: params.type,
+        from: params.from,
+        to: params.to,
       }}
     />
   );

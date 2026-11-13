@@ -15,6 +15,8 @@ import {
 } from "@/lib/validations/transaction";
 import { Transaction, Account, Category, TransactionType } from "@/types/database.types";
 import { TRANSACTION_SELECT_QUERY } from "@/lib/constants";
+import { escapeCsvField, UTF8_BOM, CSV_LINE_BREAK } from "@/lib/csv";
+import { isValidDateString } from "@/lib/analytics/periods";
 
 export type TransactionWithRelations = Transaction & {
   account?: Pick<Account, "id" | "name" | "type" | "currency" | "color" | "icon"> | null;
@@ -539,6 +541,8 @@ export interface ExportTransactionsFilterInput {
   selectedAccount?: string;
   selectedType?: string;
   selectedCategory?: string;
+  from?: string;
+  to?: string;
 }
 
 export interface ExportTransactionsResult {
@@ -549,31 +553,6 @@ export interface ExportTransactionsResult {
   isCapped?: boolean;
   totalFound?: number;
   error?: string;
-}
-
-const CSV_FORMULA_TRIGGERS = ["=", "+", "-", "@", "\t", "\r"];
-
-function escapeCsvField(val: unknown, isTextField = false): string {
-  if (val === null || val === undefined) return "";
-  let str = String(val);
-
-  // Neutralize spreadsheet formula injection on user-controlled text fields (CWE-1236)
-  if (isTextField && str.length > 0) {
-    const firstChar = str.charAt(0);
-    if (CSV_FORMULA_TRIGGERS.includes(firstChar)) {
-      str = `'${str}`;
-    }
-  }
-
-  if (
-    str.includes(",") ||
-    str.includes('"') ||
-    str.includes("\n") ||
-    str.includes("\r")
-  ) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
 }
 
 /**
@@ -601,7 +580,32 @@ export async function exportFilteredTransactionsAction(
     selectedAccount = "all",
     selectedType = "all",
     selectedCategory = "all",
+    from,
+    to,
   } = filters || {};
+
+  // Validate date range inputs server-side
+  const safeFrom = from && isValidDateString(from) ? from : undefined;
+  const safeTo = to && isValidDateString(to) ? to : undefined;
+
+  if (from && !safeFrom) {
+    return {
+      success: false,
+      error: "Invalid start date. Must be a valid calendar date in YYYY-MM-DD format.",
+    };
+  }
+  if (to && !safeTo) {
+    return {
+      success: false,
+      error: "Invalid end date. Must be a valid calendar date in YYYY-MM-DD format.",
+    };
+  }
+  if (safeFrom && safeTo && safeFrom > safeTo) {
+    return {
+      success: false,
+      error: "Invalid date range: start date cannot be after end date.",
+    };
+  }
 
   // Build query enforcing RLS via user_id
   let query = supabase
@@ -639,6 +643,14 @@ export async function exportFilteredTransactionsAction(
   // Apply Category Filter
   if (selectedCategory && selectedCategory !== "all") {
     query = query.eq("category_id", selectedCategory);
+  }
+
+  // Apply Date Range Filter
+  if (safeFrom) {
+    query = query.gte("date", safeFrom);
+  }
+  if (safeTo) {
+    query = query.lte("date", safeTo);
   }
 
   // Fetch up to 5,001 rows to detect if capped
@@ -740,9 +752,17 @@ export async function exportFilteredTransactionsAction(
   });
 
   // Prepend UTF-8 BOM for Microsoft Excel / spreadsheet compatibility
-  const csvContent = "\uFEFF" + csvLines.join("\r\n");
+  const csvContent = UTF8_BOM + csvLines.join(CSV_LINE_BREAK);
   const todayStr = new Date().toISOString().split("T")[0];
-  const filename = `finora-transactions-${todayStr}.csv`;
+  const filePeriodStr =
+    safeFrom && safeTo
+      ? `${safeFrom}-to-${safeTo}`
+      : safeFrom
+      ? `from-${safeFrom}`
+      : safeTo
+      ? `to-${safeTo}`
+      : todayStr;
+  const filename = `finora-transactions-${filePeriodStr}.csv`;
 
   return {
     success: true,

@@ -26,7 +26,7 @@ export const PERIOD_PRESETS: { key: AnalyticsPeriodKey; label: string }[] = [
 /**
  * Formats year and month (1-12) as YYYY-MM-DD string for 1st of month.
  */
-function formatDate(year: number, month: number, day: number = 1): string {
+export function formatDate(year: number, month: number, day: number = 1): string {
   const m = String(month).padStart(2, "0");
   const d = String(day).padStart(2, "0");
   return `${year}-${m}-${d}`;
@@ -42,6 +42,19 @@ function createMonthBucket(year: number, month: number): MonthBucket {
 }
 
 /**
+ * Formats YYYY-MM-DD to a human-readable date e.g. "15 Oct 2026"
+ */
+export function formatHumanDate(dateStr: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const [yearStr, monthStr, dayStr] = dateStr.split("-");
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  const monthLabel = MONTH_NAMES_SHORT[month - 1] || monthStr;
+  return `${day} ${monthLabel} ${year}`;
+}
+
+/**
  * Validates and safely parses a period key from searchParams.
  */
 export function parsePeriodKey(key?: string | null): AnalyticsPeriodKey {
@@ -50,11 +63,227 @@ export function parsePeriodKey(key?: string | null): AnalyticsPeriodKey {
     key === "last_month" ||
     key === "last_3_months" ||
     key === "last_6_months" ||
-    key === "this_year"
+    key === "this_year" ||
+    key === "custom"
   ) {
     return key;
   }
   return "this_month";
+}
+
+/**
+ * Validates whether a string is a real calendar date in YYYY-MM-DD format.
+ */
+export function isValidDateString(dateStr?: string | null): dateStr is string {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return (
+    date.getUTCFullYear() === y &&
+    date.getUTCMonth() === m - 1 &&
+    date.getUTCDate() === d
+  );
+}
+
+/**
+ * Shifts a calendar date by N days using UTC arithmetic to avoid timezone shifts.
+ */
+export function addCalendarDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return formatDate(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate()
+  );
+}
+
+/**
+ * Computes calendar days inclusive between two YYYY-MM-DD dates.
+ */
+export function getCalendarDayDifference(
+  startDateStr: string,
+  endDateStr: string
+): number {
+  const [y1, m1, d1] = startDateStr.split("-").map(Number);
+  const [y2, m2, d2] = endDateStr.split("-").map(Number);
+  const t1 = Date.UTC(y1, m1 - 1, d1);
+  const t2 = Date.UTC(y2, m2 - 1, d2);
+  return Math.round((t2 - t1) / 86400000) + 1;
+}
+
+/**
+ * Generates month buckets covering all months spanning a date range.
+ */
+export function getMonthBucketsInRange(
+  startDateStr: string,
+  endDateInclusiveStr: string
+): MonthBucket[] {
+  const [y1, m1] = startDateStr.split("-").map(Number);
+  const [y2, m2] = endDateInclusiveStr.split("-").map(Number);
+  const months: MonthBucket[] = [];
+  let curY = y1;
+  let curM = m1;
+  while (curY < y2 || (curY === y2 && curM <= m2)) {
+    months.push(createMonthBucket(curY, curM));
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+  return months;
+}
+
+export const MAX_CUSTOM_PERIOD_DAYS = 3660; // 10 years maximum reporting window
+
+export interface MonthProration {
+  year: number;
+  month: number;
+  daysInMonth: number;
+  selectedDays: number;
+  ratio: number;
+}
+
+export interface DateRangeProrationResult {
+  isPartial: boolean;
+  prorations: MonthProration[];
+}
+
+/**
+ * Computes exact calendar-day proration details for each month touched by a custom date range.
+ */
+export function getMonthProrationDetails(
+  startDateStr: string,
+  endDateInclusiveStr: string
+): DateRangeProrationResult {
+  if (!isValidDateString(startDateStr) || !isValidDateString(endDateInclusiveStr)) {
+    return { isPartial: false, prorations: [] };
+  }
+
+  const [y1, m1] = startDateStr.split("-").map(Number);
+  const [y2, m2] = endDateInclusiveStr.split("-").map(Number);
+  const prorations: MonthProration[] = [];
+  let isPartial = false;
+
+  let curY = y1;
+  let curM = m1;
+  while (curY < y2 || (curY === y2 && curM <= m2)) {
+    const daysInMonth = new Date(Date.UTC(curY, curM, 0)).getUTCDate();
+    const monthStartStr = formatDate(curY, curM, 1);
+    const monthEndStr = formatDate(curY, curM, daysInMonth);
+
+    const overlapStart = startDateStr > monthStartStr ? startDateStr : monthStartStr;
+    const overlapEnd = endDateInclusiveStr < monthEndStr ? endDateInclusiveStr : monthEndStr;
+
+    const selectedDays = getCalendarDayDifference(overlapStart, overlapEnd);
+    const ratio = Math.max(0, Math.min(1, selectedDays / daysInMonth));
+
+    if (selectedDays < daysInMonth) {
+      isPartial = true;
+    }
+
+    prorations.push({
+      year: curY,
+      month: curM,
+      daysInMonth,
+      selectedDays,
+      ratio,
+    });
+
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+
+  return { isPartial, prorations };
+}
+
+/**
+ * Computes interval, exclusive end date, and month buckets for a custom date range.
+ */
+export function getCustomPeriodInterval(
+  customFrom?: string,
+  customTo?: string
+): PeriodInterval {
+  if (!isValidDateString(customFrom) || !isValidDateString(customTo)) {
+    return getPeriodInterval("this_month");
+  }
+
+  // Reject reversed ranges: do NOT silently swap
+  if (customFrom > customTo) {
+    return getPeriodInterval("this_month");
+  }
+
+  // Reject date ranges exceeding the maximum allowable threshold
+  const durationDays = getCalendarDayDifference(customFrom, customTo);
+  if (durationDays > MAX_CUSTOM_PERIOD_DAYS) {
+    return getPeriodInterval("this_month");
+  }
+
+  const startDate = customFrom;
+  // Convert inclusive user end date to exclusive end date for SQL boundary
+  const endDateExclusive = addCalendarDays(customTo, 1);
+  const months = getMonthBucketsInRange(customFrom, customTo);
+  const label = `${formatHumanDate(customFrom)} – ${formatHumanDate(customTo)}`;
+
+  return {
+    key: "custom",
+    label,
+    startDate,
+    endDateExclusive,
+    months,
+    isCustom: true,
+    customStartDate: customFrom,
+    customEndDate: customTo,
+  };
+}
+
+/**
+ * Computes the comparative prior period of identical calendar duration immediately preceding customFrom.
+ */
+export function getCustomPreviousPeriodInterval(
+  customFrom?: string,
+  customTo?: string
+): PeriodInterval {
+  if (!isValidDateString(customFrom) || !isValidDateString(customTo)) {
+    return getPreviousPeriodInterval("this_month");
+  }
+
+  // Reject reversed ranges
+  if (customFrom > customTo) {
+    return getPreviousPeriodInterval("this_month");
+  }
+
+  const durationDays = getCalendarDayDifference(customFrom, customTo);
+  if (durationDays > MAX_CUSTOM_PERIOD_DAYS) {
+    return getPreviousPeriodInterval("this_month");
+  }
+
+  // Prior period ends when current period starts (exclusive)
+  const prevEndDateExclusive = customFrom;
+  // Prior period starts (durationDays) before current start
+  const prevStartDate = addCalendarDays(customFrom, -durationDays);
+  // Inclusive last day of prior period
+  const prevEndDateInclusive = addCalendarDays(customFrom, -1);
+
+  const months = getMonthBucketsInRange(prevStartDate, prevEndDateInclusive);
+  const label = `Prior Period (${formatHumanDate(prevStartDate)} – ${formatHumanDate(prevEndDateInclusive)})`;
+
+  return {
+    key: "custom",
+    label,
+    startDate: prevStartDate,
+    endDateExclusive: prevEndDateExclusive,
+    months,
+    isCustom: true,
+    customStartDate: prevStartDate,
+    customEndDate: prevEndDateInclusive,
+  };
 }
 
 /**
@@ -63,8 +292,18 @@ export function parsePeriodKey(key?: string | null): AnalyticsPeriodKey {
  */
 export function getPeriodInterval(
   periodKey: AnalyticsPeriodKey = "this_month",
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  customFrom?: string,
+  customTo?: string
 ): PeriodInterval {
+  if (periodKey === "custom") {
+    if (isValidDateString(customFrom) && isValidDateString(customTo)) {
+      return getCustomPeriodInterval(customFrom, customTo);
+    }
+    // Fallback safely to this_month if custom dates are missing or invalid
+    periodKey = "this_month";
+  }
+
   const currentYear = referenceDate.getFullYear();
   const currentMonth = referenceDate.getMonth() + 1; // 1-12
 
@@ -174,8 +413,17 @@ export function getPeriodInterval(
  */
 export function getPreviousPeriodInterval(
   periodKey: AnalyticsPeriodKey = "this_month",
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  customFrom?: string,
+  customTo?: string
 ): PeriodInterval {
+  if (periodKey === "custom") {
+    if (isValidDateString(customFrom) && isValidDateString(customTo)) {
+      return getCustomPreviousPeriodInterval(customFrom, customTo);
+    }
+    periodKey = "this_month";
+  }
+
   const currentYear = referenceDate.getFullYear();
   const currentMonth = referenceDate.getMonth() + 1; // 1-12
 

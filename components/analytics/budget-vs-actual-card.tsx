@@ -27,6 +27,7 @@ interface BudgetVsActualCardProps {
   unbudgeted: CategoryExpenseItem[];
   defaultCurrency: string;
   isMultiMonth: boolean;
+  isProrated?: boolean;
 }
 
 function DynamicCategoryIcon({
@@ -45,9 +46,11 @@ export function BudgetVsActualCard({
   unbudgeted,
   defaultCurrency,
   isMultiMonth,
+  isProrated,
 }: BudgetVsActualCardProps) {
-  const totalBudgeted = budgets.reduce((acc, curr) => acc + curr.budgetedAmount, 0);
-  const totalBudgetedSpent = budgets.reduce((acc, curr) => acc + curr.actualSpent, 0);
+  const activeBudgets = budgets.filter((b) => b.hasBudget);
+  const totalBudgeted = activeBudgets.reduce((acc, curr) => acc + curr.budgetedAmount, 0);
+  const totalBudgetedSpent = activeBudgets.reduce((acc, curr) => acc + curr.actualSpent, 0);
   const totalUnbudgetedSpent = unbudgeted.reduce(
     (acc, curr) => acc + curr.effectiveExpense,
     0
@@ -62,11 +65,15 @@ export function BudgetVsActualCard({
               <CardTitle className="text-base font-semibold tracking-tight text-foreground">
                 Budget vs. Actual Spending
               </CardTitle>
-              {isMultiMonth && (
+              {isProrated ? (
+                <Badge variant="secondary" className="text-[10px] font-medium text-primary bg-primary/10">
+                  Prorated for Custom Range
+                </Badge>
+              ) : isMultiMonth ? (
                 <Badge variant="secondary" className="text-[10px] font-medium">
                   Summed Period Total
                 </Badge>
-              )}
+              ) : null}
             </div>
             <CardDescription className="text-xs">
               Reconciliation of planned monthly allowances against actual net outflows
@@ -91,7 +98,7 @@ export function BudgetVsActualCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-6 pt-2">
-        {budgets.length === 0 ? (
+        {activeBudgets.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground space-y-2">
             <p className="font-medium text-foreground">
               No budgets configured for this timeframe.
@@ -105,7 +112,7 @@ export function BudgetVsActualCard({
           </div>
         ) : (
           <div className="space-y-4">
-            {budgets.map((item) => {
+            {activeBudgets.map((item) => {
               const isOver = item.isOverBudget;
               const isNear = item.percentageSpent >= 80 && !isOver;
 

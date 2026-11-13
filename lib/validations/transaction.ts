@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidDateString } from "@/lib/analytics/periods";
 
 export const transactionTypeSchema = z.enum([
   "income",
@@ -296,6 +297,20 @@ export const transactionSearchParamsSchema = z.object({
     .enum(["all", "income", "expense", "transfer", "refund", "adjustment", "loan_repayment"])
     .optional()
     .default("all"),
+  from: z
+    .string()
+    .trim()
+    .refine((val) => !val || isValidDateString(val), {
+      message: "Invalid from date format. Must be a valid calendar date in YYYY-MM-DD format",
+    })
+    .optional(),
+  to: z
+    .string()
+    .trim()
+    .refine((val) => !val || isValidDateString(val), {
+      message: "Invalid to date format. Must be a valid calendar date in YYYY-MM-DD format",
+    })
+    .optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   pageSize: z.coerce
     .number()
@@ -305,7 +320,13 @@ export const transactionSearchParamsSchema = z.object({
     })
     .optional()
     .default(25),
-});
+}).refine(
+  (data) => !data.from || !data.to || data.from <= data.to,
+  {
+    message: "Start date cannot be after end date",
+    path: ["from"],
+  }
+);
 
 export type TransactionSearchParams = z.infer<
   typeof transactionSearchParamsSchema
@@ -322,6 +343,8 @@ export function parseTransactionSearchParams(
     account: getSingle(rawParams.account),
     category: getSingle(rawParams.category),
     type: getSingle(rawParams.type),
+    from: getSingle(rawParams.from),
+    to: getSingle(rawParams.to),
     page: getSingle(rawParams.page),
     pageSize: getSingle(rawParams.pageSize),
   };
@@ -343,6 +366,21 @@ export function parseTransactionSearchParams(
 
   const validTypes = ["income", "expense", "transfer", "refund", "adjustment", "loan_repayment"];
 
+  let safeFrom =
+    typeof candidate.from === "string" && isValidDateString(candidate.from.trim())
+      ? candidate.from.trim()
+      : undefined;
+  let safeTo =
+    typeof candidate.to === "string" && isValidDateString(candidate.to.trim())
+      ? candidate.to.trim()
+      : undefined;
+
+  // If both dates are provided and reversed, safely discard both to prevent invalid queries
+  if (safeFrom && safeTo && safeFrom > safeTo) {
+    safeFrom = undefined;
+    safeTo = undefined;
+  }
+
   return {
     q: typeof candidate.q === "string" ? candidate.q.slice(0, 100).trim() : "",
     account: safeAccount,
@@ -350,6 +388,8 @@ export function parseTransactionSearchParams(
     type: validTypes.includes(candidate.type as string)
       ? (candidate.type as TransactionType)
       : "all",
+    from: safeFrom,
+    to: safeTo,
     page: Math.max(1, parseInt(String(candidate.page), 10) || 1),
     pageSize: [10, 25, 50, 100].includes(parseInt(String(candidate.pageSize), 10))
       ? parseInt(String(candidate.pageSize), 10)

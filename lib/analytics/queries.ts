@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
-import { getPeriodInterval, getPreviousPeriodInterval } from "./periods";
+import {
+  getPeriodInterval,
+  getPreviousPeriodInterval,
+  getMonthProrationDetails,
+} from "./periods";
 import {
   AnalyticsData,
   AnalyticsPeriodKey,
@@ -99,10 +103,17 @@ export async function getAnalyticsData(
   userId: string,
   defaultCurrency: string = "INR",
   periodKey: AnalyticsPeriodKey = "this_month",
-  includeTrend: boolean = true
+  includeTrend: boolean = true,
+  customFrom?: string,
+  customTo?: string
 ): Promise<AnalyticsData> {
-  const period = getPeriodInterval(periodKey);
-  const previousPeriod = getPreviousPeriodInterval(periodKey);
+  const period = getPeriodInterval(periodKey, new Date(), customFrom, customTo);
+  const previousPeriod = getPreviousPeriodInterval(
+    periodKey,
+    new Date(),
+    customFrom,
+    customTo
+  );
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("fn_get_analytics_data", {
@@ -116,7 +127,8 @@ export async function getAnalyticsData(
   });
 
   if (error) {
-    throw new Error(`Failed to load analytics data: ${error.message}`);
+    console.error("Failed to load analytics data from database:", error);
+    throw new Error("Failed to load analytics data. Please try again.");
   }
 
   const rpcData = data as unknown as RpcAnalyticsResponse;
@@ -190,6 +202,87 @@ export async function getAnalyticsData(
     isOverBudget: Boolean(b.isOverBudget),
     hasBudget: Boolean(b.hasBudget),
   }));
+
+  // For custom date ranges that touch partial months, calculate exact calendar-day proration
+  // so spending from a partial period is not compared against full-month budget allowances.
+  if (period.isCustom && period.customStartDate && period.customEndDate) {
+    const prorationInfo = getMonthProrationDetails(
+      period.customStartDate,
+      period.customEndDate
+    );
+
+    if (prorationInfo.isPartial) {
+      period.isPartialBudget = true;
+
+      const rawBudgets: {
+        category_id: string;
+        amount: number;
+        month: number;
+        year: number;
+      }[] = [];
+      const BUDGET_BATCH_SIZE = 1000;
+      let budgetOffset = 0;
+      let hasMoreBudgets = true;
+
+      while (hasMoreBudgets) {
+        const { data: pageBudgets, error: rawBudgetsError } = await supabase
+          .from("budgets")
+          .select("category_id, amount, month, year")
+          .eq("user_id", userId)
+          .order("id", { ascending: true })
+          .range(budgetOffset, budgetOffset + BUDGET_BATCH_SIZE - 1);
+
+        if (rawBudgetsError) {
+          console.error(
+            "Failed to load budget data for proration:",
+            rawBudgetsError
+          );
+          throw new Error("Failed to load budget data for proration.");
+        }
+
+        if (pageBudgets && pageBudgets.length > 0) {
+          rawBudgets.push(...pageBudgets);
+        }
+
+        if (!pageBudgets || pageBudgets.length < BUDGET_BATCH_SIZE) {
+          hasMoreBudgets = false;
+        } else {
+          budgetOffset += BUDGET_BATCH_SIZE;
+        }
+      }
+
+      const proratedMap = new Map<string, number>();
+      for (const b of rawBudgets || []) {
+        const proration = prorationInfo.prorations.find(
+          (p) => p.year === b.year && p.month === b.month
+        );
+        if (proration && b.category_id) {
+          const current = proratedMap.get(b.category_id) || 0;
+          proratedMap.set(
+            b.category_id,
+            current + Number(b.amount || 0) * proration.ratio
+          );
+        }
+      }
+
+      for (const item of budgetVsActual) {
+        const proratedAmount = proratedMap.has(item.categoryId)
+          ? Math.round((proratedMap.get(item.categoryId) || 0) * 100) / 100
+          : 0;
+
+        item.budgetedAmount = proratedAmount;
+        item.variance =
+          Math.round((proratedAmount - item.actualSpent) * 100) / 100;
+        item.percentageSpent =
+          proratedAmount > 0
+            ? Number(((item.actualSpent / proratedAmount) * 100).toFixed(4))
+            : 0;
+        item.isOverBudget =
+          proratedAmount > 0 && item.actualSpent > proratedAmount;
+        item.hasBudget = proratedAmount > 0;
+      }
+    }
+  }
 
   const unbudgetedSpending: CategoryExpenseItem[] = (rpcData.unbudgetedSpending || []).map((u) => ({
     categoryId: u.categoryId || null,
