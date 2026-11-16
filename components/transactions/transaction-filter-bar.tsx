@@ -72,14 +72,18 @@ export function TransactionFilterBar({
   const [dateError, setDateError] = useState<string | null>(null);
 
   // Synchronize when external reset or searchQuery changes
-  useEffect(() => {
+  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
+  if (prevSearchQuery !== searchQuery) {
+    setPrevSearchQuery(searchQuery);
     setLocalSearch(searchQuery);
-  }, [searchQuery]);
+  }
 
-  useEffect(() => {
+  const [prevDates, setPrevDates] = useState({ fromDate, toDate });
+  if (prevDates.fromDate !== fromDate || prevDates.toDate !== toDate) {
+    setPrevDates({ fromDate, toDate });
     setTempFrom(fromDate || "");
     setTempTo(toDate || "");
-  }, [fromDate, toDate]);
+  }
 
   // Debounce search query changes by 300ms
   useEffect(() => {
@@ -312,7 +316,6 @@ export function TransactionFilterBar({
                     id="tx-from"
                     type="date"
                     value={tempFrom}
-                    max={tempTo || undefined}
                     onChange={(e) => {
                       setTempFrom(e.target.value);
                       setDateError(null);
@@ -329,7 +332,6 @@ export function TransactionFilterBar({
                     id="tx-to"
                     type="date"
                     value={tempTo}
-                    min={tempFrom || undefined}
                     onChange={(e) => {
                       setTempTo(e.target.value);
                       setDateError(null);
